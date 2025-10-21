@@ -25,6 +25,7 @@ export class CalendarView extends ItemView {
 	async onOpen() {
 		const container = this.containerEl.children[1];
 		container.empty();
+		container.addClass('calendar-view');
 		container.createEl('h4', { text: 'Calendar View' });
 		
 		this.render();
