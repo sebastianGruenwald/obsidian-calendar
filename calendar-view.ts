@@ -123,9 +123,17 @@ export class CalendarView extends ItemView {
 		const endDate = new Date(startDate);
 		endDate.setDate(endDate.getDate() + 41);
 
+		let dayIndex = 0;
+		let selectedDateElement: HTMLElement | null = null;
+
 		for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
 			const dateStr = this.formatDate(d);
 			const dayEl = grid.createEl('div', { cls: 'calendar-day' });
+			
+			// Track selected date element for scrolling
+			if (dateStr === this.selectedDate) {
+				selectedDateElement = dayEl;
+			}
 			
 			// Add classes
 			if (d.getMonth() !== month) {
@@ -152,9 +160,26 @@ export class CalendarView extends ItemView {
 
 			// Click handler
 			dayEl.addEventListener('click', () => {
-				this.selectedDate = dateStr;
+				if (this.selectedDate === dateStr) {
+					// Deselect if clicking on already selected date
+					this.selectedDate = null;
+				} else {
+					// Select new date
+					this.selectedDate = dateStr;
+				}
 				this.render();
 			});
+			
+			dayIndex++;
+		}
+		
+		// Auto-scroll to selected date if it exists and calendar is scrollable
+		if (selectedDateElement && this.selectedDate) {
+			setTimeout(() => {
+				if (selectedDateElement) {
+					this.scrollToSelectedDate(grid, selectedDateElement);
+				}
+			}, 50); // Small delay to ensure rendering is complete
 		}
 	}
 
@@ -190,6 +215,39 @@ export class CalendarView extends ItemView {
 					e.preventDefault();
 					this.app.workspace.openLinkText(file.path, '', false);
 				});
+			});
+		}
+	}
+
+	scrollToSelectedDate(grid: HTMLElement, selectedElement: HTMLElement) {
+		// Check if the calendar grid is scrollable
+		if (grid.scrollHeight <= grid.clientHeight) {
+			return; // No need to scroll if everything is visible
+		}
+
+		// Get the position of the selected element relative to the grid
+		const gridRect = grid.getBoundingClientRect();
+		const elementRect = selectedElement.getBoundingClientRect();
+		
+		// Calculate if the selected element is visible
+		const isVisible = (
+			elementRect.top >= gridRect.top &&
+			elementRect.bottom <= gridRect.bottom
+		);
+
+		// Only scroll if the selected element is not fully visible
+		if (!isVisible) {
+			// Calculate the scroll position to center the selected element
+			const elementTop = selectedElement.offsetTop;
+			const gridHeight = grid.clientHeight;
+			const elementHeight = selectedElement.offsetHeight;
+			
+			// Scroll to center the selected element (or as close as possible)
+			const scrollTop = Math.max(0, elementTop - (gridHeight / 2) + (elementHeight / 2));
+			
+			grid.scrollTo({
+				top: scrollTop,
+				behavior: 'smooth'
 			});
 		}
 	}
