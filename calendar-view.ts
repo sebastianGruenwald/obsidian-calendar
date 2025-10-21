@@ -221,9 +221,24 @@ export class CalendarView extends ItemView {
 
 	hasRequiredTag(cache: CachedMetadata): boolean {
 		const requiredTag = this.plugin.settings.tagFilter;
-		if (!cache.tags) return false;
 		
-		return cache.tags.some(tag => tag.tag === `#${requiredTag}`);
+		// Check inline tags
+		if (cache.tags) {
+			const hasInlineTag = cache.tags.some(tag => tag.tag === `#${requiredTag}`);
+			if (hasInlineTag) return true;
+		}
+		
+		// Check frontmatter tags
+		if (cache.frontmatter && cache.frontmatter.tags) {
+			const frontmatterTags = cache.frontmatter.tags;
+			if (Array.isArray(frontmatterTags)) {
+				return frontmatterTags.includes(requiredTag);
+			} else if (typeof frontmatterTags === 'string') {
+				return frontmatterTags === requiredTag;
+			}
+		}
+		
+		return false;
 	}
 
 	getDateFromFrontmatter(cache: CachedMetadata): string | null {
@@ -293,11 +308,17 @@ export class CalendarView extends ItemView {
 			// Create the file
 			const newFile = await this.app.vault.create(fullPath, noteContent);
 			
+			// Wait a moment for the metadata cache to update
+			await new Promise(resolve => setTimeout(resolve, 100));
+			
+			// Force metadata cache refresh for the new file
+			await this.app.metadataCache.getFileCache(newFile);
+			
 			// Open the new file
 			this.app.workspace.openLinkText(newFile.path, '', false);
 			
 			// Refresh the calendar to show the new file
-			this.refresh();
+			setTimeout(() => this.refresh(), 200);
 		} catch (error) {
 			console.error('Failed to create note:', error);
 			// You could show a notice to the user here if needed
