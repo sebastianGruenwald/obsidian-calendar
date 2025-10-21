@@ -184,6 +184,12 @@
   padding: 0;
 }
 
+.calendar-files-scrollable {
+  max-height: 200px;
+  overflow-y: auto;
+  padding-right: 8px;
+}
+
 .calendar-file-item {
   margin-bottom: 0.25rem;
 }

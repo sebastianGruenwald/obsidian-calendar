@@ -185,23 +185,13 @@ export class CalendarView extends ItemView {
 
 	renderFileList(container: HTMLElement, filesWithDates: Map<string, TFile[]>) {
 		const fileListContainer = container.createEl('div', { cls: 'calendar-file-list' });
-		
-		const selectedDateObj = new Date(this.selectedDate!);
-		const dateHeader = fileListContainer.createEl('h5', { 
-			text: selectedDateObj.toLocaleDateString('en-US', { 
-				weekday: 'long',
-				year: 'numeric', 
-				month: 'long', 
-				day: 'numeric' 
-			})
-		});
 
 		const files = filesWithDates.get(this.selectedDate!) || [];
 		
 		if (files.length === 0) {
 			fileListContainer.createEl('p', { text: 'No files for this date' });
 		} else {
-			const fileList = fileListContainer.createEl('ul', { cls: 'calendar-files' });
+			const fileList = fileListContainer.createEl('ul', { cls: 'calendar-files calendar-files-scrollable' });
 			
 			files.forEach(file => {
 				const listItem = fileList.createEl('li', { cls: 'calendar-file-item' });
