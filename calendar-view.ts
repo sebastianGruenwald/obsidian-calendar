@@ -407,10 +407,7 @@ export class CalendarView extends ItemView {
 		// Create frontmatter with title and properties only
 		const frontmatter = `---\n${dateProperty}: ${dateStr}\ntags:\n  - ${tagFilter}\n---\n\n`;
 		
-		// Only add the title, no template content
-		const content = `# ${title}\n\n`;
-		
-		return frontmatter + content;
+		return frontmatter;
 	}
 
 	async ensureFolderExists(folderPath: string): Promise<void> {

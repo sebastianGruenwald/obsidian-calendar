@@ -1,7 +1,8 @@
 /* Calendar View Styles */
 
 .calendar-view {
-  height: 100%;
+  max-height: 100%;
+  min-height: 60%;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -66,6 +67,8 @@
   height: clamp(300px, 50vh, 600px);
   max-height: 60vh;
   scroll-behavior: smooth;
+  flex: 1;
+  min-height: 150px;
 }
 
 .calendar-day-header {
@@ -169,6 +172,9 @@
 .calendar-file-list {
   border-top: 1px solid var(--background-modifier-border);
   padding-top: 1rem;
+  max-height: 40vh;
+  overflow-y: auto;
+  flex-shrink: 0;
 }
 
 .calendar-file-list h5 {
@@ -185,9 +191,10 @@
 }
 
 .calendar-files-scrollable {
-  max-height: 200px;
   overflow-y: auto;
   padding-right: 8px;
+  max-height: 100%;
+  min-height: 40%;
 }
 
 .calendar-file-item {
