@@ -254,7 +254,8 @@ export class CalendarView extends ItemView {
 
 	normalizeDate(dateStr: string): string | null {
 		try {
-			const date = new Date(dateStr);
+			// Parse the date string and ensure we treat it as local time
+			const date = new Date(dateStr + 'T00:00:00'); // Force local time interpretation
 			if (isNaN(date.getTime())) return null;
 			return this.formatDate(date);
 		} catch {
@@ -263,7 +264,11 @@ export class CalendarView extends ItemView {
 	}
 
 	formatDate(date: Date): string {
-		return date.toISOString().split('T')[0];
+		// Use local time methods to avoid timezone issues
+		const year = date.getFullYear();
+		const month = String(date.getMonth() + 1).padStart(2, '0');
+		const day = String(date.getDate()).padStart(2, '0');
+		return `${year}-${month}-${day}`;
 	}
 
 	isToday(date: Date): boolean {
@@ -272,7 +277,8 @@ export class CalendarView extends ItemView {
 	}
 
 	async createNoteForDate(dateStr: string): Promise<void> {
-		const date = new Date(dateStr);
+		// Parse date consistently with local time
+		const date = new Date(dateStr + 'T00:00:00');
 		const settings = this.plugin.settings;
 		
 		// Format date for title
