@@ -75,6 +75,17 @@ export class CalendarView extends ItemView {
 			this.render();
 		});
 
+		// Add create note button (only visible when date is selected)
+		if (this.selectedDate) {
+			const createNoteBtn = navDiv.createEl('button', {
+				text: '+ Note',
+				cls: 'calendar-create-note-btn calendar-create-note-btn-header'
+			});
+			createNoteBtn.addEventListener('click', () => {
+				this.createNoteForDate(this.selectedDate!);
+			});
+		}
+
 		// Calendar grid
 		const calendarGrid = container.createEl('div', { cls: 'calendar-grid' });
 		
@@ -158,15 +169,6 @@ export class CalendarView extends ItemView {
 				month: 'long', 
 				day: 'numeric' 
 			})
-		});
-
-		// Add create note button
-		const createNoteBtn = fileListContainer.createEl('button', {
-			text: '+ Create Note',
-			cls: 'calendar-create-note-btn'
-		});
-		createNoteBtn.addEventListener('click', () => {
-			this.createNoteForDate(this.selectedDate!);
 		});
 
 		const files = filesWithDates.get(this.selectedDate!) || [];
@@ -354,13 +356,11 @@ export class CalendarView extends ItemView {
 		const tagFilter = settings.tagFilter;
 		const dateProperty = settings.dateProperty;
 		
-		// Create frontmatter
+		// Create frontmatter with title and properties only
 		const frontmatter = `---\n${dateProperty}: ${dateStr}\ntags:\n  - ${tagFilter}\n---\n\n`;
 		
-		// Process template
-		const content = settings.noteTemplate
-			.replace(/{{title}}/g, title)
-			.replace(/{{date}}/g, formattedDate);
+		// Only add the title, no template content
+		const content = `# ${title}\n\n`;
 		
 		return frontmatter + content;
 	}
