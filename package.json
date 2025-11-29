@@ -1,6 +1,6 @@
 {
   "name": "obsidian-calendar-view-plugin",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Obsidian plugin for calendar view from tagged pages",
   "main": "main.js",
   "scripts": {
