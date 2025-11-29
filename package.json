@@ -1,6 +1,6 @@
 {
   "name": "obsidian-calendar-view-plugin",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Modern calendar view plugin for Obsidian - display and manage notes by date",
   "main": "main.js",
   "scripts": {
