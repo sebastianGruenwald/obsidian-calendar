@@ -1,26 +1,33 @@
 {
   "name": "obsidian-calendar-view-plugin",
-  "version": "1.0.2",
-  "description": "Obsidian plugin for calendar view from tagged pages",
+  "version": "2.0.0",
+  "description": "Modern calendar view plugin for Obsidian - display and manage notes by date",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production && npm run copy-files",
     "copy-files": "cp main.js deployment/ && cp styles.css deployment/ && cp manifest.json deployment/",
     "version": "node version-bump.mjs && git add manifest.json versions.json",
-    "release": "./release.sh"
+    "release": "./release.sh",
+    "lint": "tsc --noEmit",
+    "clean": "rm -rf main.js styles.css dist"
   },
-  "keywords": [],
+  "keywords": [
+    "obsidian",
+    "calendar",
+    "notes",
+    "plugin"
+  ],
   "author": "Waschtlgrea",
   "license": "MIT",
   "devDependencies": {
-    "@types/node": "^16.11.6",
-    "@typescript-eslint/eslint-plugin": "5.29.0",
-    "@typescript-eslint/parser": "5.29.0",
-    "builtin-modules": "3.3.0",
-    "esbuild": "0.17.3",
+    "@types/node": "^20.10.0",
+    "@typescript-eslint/eslint-plugin": "^6.13.0",
+    "@typescript-eslint/parser": "^6.13.0",
+    "builtin-modules": "^3.3.0",
+    "esbuild": "^0.19.8",
     "obsidian": "latest",
-    "tslib": "2.4.0",
-    "typescript": "4.7.4"
+    "tslib": "^2.6.2",
+    "typescript": "^5.3.2"
   }
 }

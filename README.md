@@ -1,42 +1,75 @@
 # Calendar View Plugin
 
-An Obsidian plugin that creates a calendar view from pages with specific tags, linking to dates via frontmatter properties.
+A modern, beautiful calendar view plugin for Obsidian that displays and manages your notes by date.
 
-## Features
+![Calendar View](https://img.shields.io/badge/version-2.0.0-blue)
+![Obsidian](https://img.shields.io/badge/Obsidian-1.0.0+-purple)
 
+## ✨ Features
+
+- **Modern UI**: Clean, responsive design with smooth animations
 - **Tag-based filtering**: Display only pages with a specific tag (e.g., `#calendar`)
-- **Date property support**: Use any frontmatter property to specify dates
-- **Interactive calendar**: Click on dates to view associated files
-- **Auto-refresh**: Automatically updates when files are created, modified, or deleted
-- **Customizable settings**: Configure the tag filter and date property name
+- **Flexible date property**: Use any frontmatter property to specify dates
+- **Interactive calendar**: Click on dates to view and manage associated notes
+- **Quick note creation**: Create new notes directly from the calendar
+- **Week numbers**: Optional ISO week number display
+- **Customizable week start**: Choose Sunday or Monday as the first day
+- **Theme integration**: Automatically adapts to your Obsidian theme
+- **Custom accent color**: Personalize the calendar's accent color
+- **Auto-refresh**: Automatically updates when files change
 
-## Installation
+## 📥 Installation
 
 ### Manual Installation
 
 1. Download the latest release from the GitHub releases page
-2. Extract the files to your Obsidian plugins folder: `{vault}/.obsidian/plugins/calendar-view-plugin/`
+2. Extract `main.js`, `styles.css`, and `manifest.json` to your Obsidian plugins folder: 
+   `{vault}/.obsidian/plugins/calendar-view-plugin/`
 3. Enable the plugin in Obsidian's Community Plugins settings
 
 ### Development Installation
 
-1. Clone this repository into your Obsidian plugins folder
-2. Run `npm install` to install dependencies
-3. Run `npm run dev` to start the development build
-4. Enable the plugin in Obsidian
+```bash
+# Clone the repository
+git clone https://github.com/your-repo/obsidian-calendar.git
 
-## Usage
+# Navigate to the project
+cd obsidian-calendar
+
+# Install dependencies
+npm install
+
+# Build for production
+npm run build
+
+# Or start development mode with file watching
+npm run dev
+```
+
+## 🚀 Usage
 
 ### Setup
 
 1. Enable the plugin in Obsidian's Community Plugins settings
-2. Configure the plugin settings:
-   - **Tag Filter**: The tag to filter pages by (default: `calendar`)
-   - **Date Property**: The frontmatter property containing the date (default: `date`)
+2. Click the calendar icon in the ribbon or use the command palette
+3. Configure settings to match your workflow
 
-### Creating Calendar Pages
+### Settings
 
-Create pages with the specified tag and date property in the frontmatter:
+| Setting | Description | Default |
+|---------|-------------|---------|
+| Tag Filter | Tag to filter pages by (without #) | `calendar` |
+| Date Property | Frontmatter property containing the date | `date` |
+| Note Folder | Folder for new calendar notes | (vault root) |
+| Date Format | Format for dates in note titles | `YYYY-MM-DD` |
+| Note Template | Template for new notes | `# {{title}}...` |
+| Week Starts On | First day of the week | Monday |
+| Show Week Numbers | Display ISO week numbers | Off |
+| Accent Color | Custom accent color (hex) | (theme default) |
+
+### Creating Calendar Notes
+
+Create notes with the specified tag and date property in the frontmatter:
 
 ```markdown
 ---
@@ -45,54 +78,84 @@ tags:
   - calendar
 ---
 
-# My Calendar Page
+# My Calendar Event
 
-This page will appear on January 15, 2024 in the calendar view.
+This note will appear on January 15, 2024 in the calendar view.
 ```
 
-### Using the Calendar
+### Date Format Tokens
 
-1. Open the calendar view by clicking the calendar icon in the ribbon or using the command palette
-2. Navigate between months using the arrow buttons
-3. Click on any date to view files associated with that date
-4. Click on file names to open them
+Use these tokens in the Date Format setting:
 
-## Date Formats
+| Token | Output | Example |
+|-------|--------|---------|
+| `YYYY` | 4-digit year | 2024 |
+| `YY` | 2-digit year | 24 |
+| `MMMM` | Full month name | January |
+| `MMM` | Short month name | Jan |
+| `MM` | Month (2-digit) | 01 |
+| `DD` | Day (2-digit) | 15 |
+| `dddd` | Full weekday | Monday |
+| `ddd` | Short weekday | Mon |
 
-The plugin supports various date formats:
-- `2024-01-15` (ISO format)
-- `January 15, 2024`
-- `15/01/2024`
-- Most standard date formats recognized by JavaScript's Date constructor
+## 🛠️ Development
 
-## Development
+### Project Structure
 
-### Building the Plugin
+```
+src/
+├── main.ts          # Plugin entry point and settings
+├── calendar-view.ts # Main calendar view component
+├── calendar-core.ts # Date calculations and file queries
+├── types.ts         # TypeScript interfaces
+├── utils.ts         # Utility functions
+└── styles.css       # Modern CSS styles
+```
+
+### Scripts
 
 ```bash
-npm install
-npm run build
+npm run dev      # Development mode with watch
+npm run build    # Production build
+npm run lint     # TypeScript type checking
+npm run clean    # Remove build artifacts
 ```
 
-### Development Mode
+### Tech Stack
 
-```bash
-npm run dev
-```
+- TypeScript 5.x with strict mode
+- ESBuild for fast bundling
+- Modern CSS with CSS variables
+- Obsidian API
 
-This will start the development build with file watching.
+## 📝 Changelog
 
-## API
+### 2.0.0
 
-The plugin exposes the following settings:
+- Complete UI redesign with modern styling
+- Reorganized project structure with proper separation of concerns
+- Added week numbers support
+- Added configurable week start day (Sunday/Monday)
+- Added custom accent color setting
+- Added note template customization
+- Improved TypeScript strict mode support
+- Updated dependencies to latest versions
+- Performance improvements with debounced refresh
 
-- `tagFilter`: String - The tag to filter pages by (without the # symbol)
-- `dateProperty`: String - The frontmatter property name containing the date
+### 1.0.x
 
-## Contributing
+- Initial release with basic calendar functionality
+
+## 🤝 Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
-## License
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
-MIT
+## 📄 License
+
+MIT License - see [LICENSE](LICENSE) for details

@@ -1,6 +1,7 @@
 import esbuild from "esbuild";
 import process from "process";
 import builtins from "builtin-modules";
+import { copyFileSync } from "fs";
 
 const banner =
 `/*
@@ -15,7 +16,7 @@ const context = await esbuild.context({
 	banner: {
 		js: banner,
 	},
-	entryPoints: ['main.ts'],
+	entryPoints: ['src/main.ts'],
 	bundle: true,
 	external: [
 		'obsidian',
@@ -33,16 +34,29 @@ const context = await esbuild.context({
 		'@lezer/lr',
 		...builtins],
 	format: 'cjs',
-	target: 'es2018',
+	target: 'es2020',
 	logLevel: "info",
 	sourcemap: prod ? false : 'inline',
 	treeShaking: true,
 	outfile: 'main.js',
 });
 
+// Copy styles.css from src to root
 if (prod) {
 	await context.rebuild();
+	try {
+		copyFileSync('src/styles.css', 'styles.css');
+		console.log('✓ Copied styles.css');
+	} catch (e) {
+		console.error('Failed to copy styles.css:', e);
+	}
 	process.exit(0);
 } else {
+	// Copy styles in dev mode too
+	try {
+		copyFileSync('src/styles.css', 'styles.css');
+	} catch (e) {
+		// Ignore in dev mode
+	}
 	await context.watch();
 }

@@ -1,16 +1,20 @@
-import { ItemView, WorkspaceLeaf, TFile, CachedMetadata } from 'obsidian';
+import { ItemView, WorkspaceLeaf, TFile } from 'obsidian';
 import CalendarPlugin from './main';
+import { CalendarCore, CalendarDate } from './calendar-core';
 
 export const VIEW_TYPE_CALENDAR = 'calendar-view';
 
 export class CalendarView extends ItemView {
 	plugin: CalendarPlugin;
+	core: CalendarCore;
 	selectedDate: string | null = null;
 	currentMonth: Date;
+	filesMap: Map<string, TFile[]> = new Map();
 
 	constructor(leaf: WorkspaceLeaf, plugin: CalendarPlugin) {
 		super(leaf);
 		this.plugin = plugin;
+		this.core = new CalendarCore(plugin.app, plugin.settings);
 		this.currentMonth = new Date();
 	}
 
@@ -19,16 +23,15 @@ export class CalendarView extends ItemView {
 	}
 
 	getDisplayText() {
-		return 'Calendar View';
+		return 'Calendar';
+	}
+
+	getIcon() {
+		return 'calendar-days';
 	}
 
 	async onOpen() {
-		const container = this.containerEl.children[1];
-		container.empty();
-		container.addClass('calendar-view');
-		container.createEl('h4', { text: 'Calendar View' });
-		
-		this.render();
+		this.refresh();
 	}
 
 	async onClose() {
@@ -36,295 +39,174 @@ export class CalendarView extends ItemView {
 	}
 
 	refresh() {
+		// Fetch data only on refresh (not on every render)
+		this.filesMap = this.core.getFilesWithDates();
 		this.render();
 	}
 
 	render() {
-		const container = this.containerEl.children[1];
+		const container = this.contentEl;
 		container.empty();
+		container.addClass('calendar-view');
 
-		// Header
+		// Header Section
+		this.renderHeader(container as HTMLElement);
+
+		// Calendar Grid
+		this.renderCalendar(container as HTMLElement);
+
+		// File List (if date selected)
+		if (this.selectedDate) {
+			this.renderFileList(container as HTMLElement);
+		}
+	}
+
+	renderHeader(container: HTMLElement) {
 		const header = container.createEl('div', { cls: 'calendar-header' });
 		
-		// Month navigation
+		// Left: Month/Year
+		const titleDiv = header.createEl('div', { cls: 'calendar-title' });
+		titleDiv.createEl('span', { 
+text: this.currentMonth.toLocaleDateString('en-US', { month: 'long' }),
+cls: 'calendar-month-name'
+});
+		titleDiv.createEl('span', { 
+text: this.currentMonth.getFullYear().toString(),
+			cls: 'calendar-year-num'
+		});
+
+		// Right: Navigation
 		const navDiv = header.createEl('div', { cls: 'calendar-nav' });
 		
-		const prevBtn = navDiv.createEl('button', { 
-			text: '‹', 
-			cls: 'calendar-nav-btn' 
+		// Today Button
+		const todayBtn = navDiv.createEl('button', { 
+text: 'Today', 
+cls: 'calendar-nav-btn calendar-today-btn' 
+});
+		todayBtn.addEventListener('click', () => {
+			this.currentMonth = new Date();
+			this.selectedDate = this.core.formatDate(new Date());
+			this.render();
 		});
+
+		// Prev/Next Buttons
+		const prevBtn = navDiv.createEl('button', { 
+cls: 'calendar-nav-btn calendar-icon-btn' 
+});
+		// Use Obsidian icon if possible, or simple text
+		prevBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>';
 		prevBtn.addEventListener('click', () => {
 			this.currentMonth.setMonth(this.currentMonth.getMonth() - 1);
 			this.render();
 		});
 
-		const monthLabel = navDiv.createEl('span', { 
-			text: this.currentMonth.toLocaleDateString('en-US', { 
-				month: 'long', 
-				year: 'numeric' 
-			}),
-			cls: 'calendar-month-label'
-		});
-
 		const nextBtn = navDiv.createEl('button', { 
-			text: '›', 
-			cls: 'calendar-nav-btn' 
-		});
+cls: 'calendar-nav-btn calendar-icon-btn' 
+});
+		nextBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>';
 		nextBtn.addEventListener('click', () => {
 			this.currentMonth.setMonth(this.currentMonth.getMonth() + 1);
 			this.render();
 		});
+	}
 
-		// Add create note button (only visible when date is selected)
-		if (this.selectedDate) {
-			const createNoteBtn = navDiv.createEl('button', {
-				text: '+ Note',
-				cls: 'calendar-create-note-btn calendar-create-note-btn-header'
-			});
-			createNoteBtn.addEventListener('click', () => {
-				this.createNoteForDate(this.selectedDate!);
-			});
-		}
-
-		// Calendar grid
-		const calendarGrid = container.createEl('div', { cls: 'calendar-grid' });
+	renderCalendar(container: HTMLElement) {
+		const calendarContainer = container.createEl('div', { cls: 'calendar-container' });
 		
-		// Day headers
+		// Weekday Headers
+		const weekHeader = calendarContainer.createEl('div', { cls: 'calendar-week-header' });
 		const dayHeaders = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 		dayHeaders.forEach(day => {
-			calendarGrid.createEl('div', { text: day, cls: 'calendar-day-header' });
+			weekHeader.createEl('div', { text: day.substring(0, 1), cls: 'calendar-weekday' });
 		});
 
-		// Get files with the specified tag and date property
-		const filesWithDates = this.getFilesWithDates();
-
-		// Calendar days
-		this.renderCalendarDays(calendarGrid, filesWithDates);
-
-		// Selected date file list
-		if (this.selectedDate) {
-			this.renderFileList(container as HTMLElement, filesWithDates);
-		}
+		// Days Grid
+		const grid = calendarContainer.createEl('div', { cls: 'calendar-grid' });
+		
+		const days = this.core.getDaysForMonth(this.currentMonth, this.selectedDate, this.filesMap);
+		
+		days.forEach(day => {
+			this.renderDay(grid, day);
+		});
 	}
 
-	renderCalendarDays(grid: HTMLElement, filesWithDates: Map<string, TFile[]>) {
-		const year = this.currentMonth.getFullYear();
-		const month = this.currentMonth.getMonth();
-		
-		// First day of the month
-		const firstDay = new Date(year, month, 1);
-		const lastDay = new Date(year, month + 1, 0);
-		
-		// Days from previous month to show
-		const startDate = new Date(firstDay);
-		startDate.setDate(startDate.getDate() - firstDay.getDay());
-		
-		// Days to show (6 weeks)
-		const endDate = new Date(startDate);
-		endDate.setDate(endDate.getDate() + 41);
+	renderDay(grid: HTMLElement, day: CalendarDate) {
+		const dayEl = grid.createEl('div', { 
+cls: `calendar-day ${day.isCurrentMonth ? '' : 'other-month'} ${day.isToday ? 'today' : ''}`
+});
 
-		let dayIndex = 0;
-		let selectedDateElement: HTMLElement | null = null;
+		if (day.dateStr === this.selectedDate) {
+			dayEl.addClass('selected');
+		}
 
-		for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
-			const dateStr = this.formatDate(d);
-			const dayEl = grid.createEl('div', { cls: 'calendar-day' });
-			
-			// Track selected date element for scrolling
-			if (dateStr === this.selectedDate) {
-				selectedDateElement = dayEl;
-			}
-			
-			// Add classes
-			if (d.getMonth() !== month) {
-				dayEl.addClass('calendar-day-other-month');
-			}
-			
-			if (this.isToday(d)) {
-				dayEl.addClass('calendar-day-today');
-			}
+		// Date Number
+		dayEl.createEl('div', { text: day.date.getDate().toString(), cls: 'calendar-date-num' });
 
-			if (dateStr === this.selectedDate) {
-				dayEl.addClass('calendar-day-selected');
+		// Dots for files
+		if (day.files.length > 0) {
+			const dotsContainer = dayEl.createEl('div', { cls: 'calendar-dots' });
+			// Show up to 3 dots
+			const dotCount = Math.min(day.files.length, 3);
+			for (let i = 0; i < dotCount; i++) {
+				dotsContainer.createEl('div', { cls: 'calendar-dot' });
 			}
+		}
 
-			// Check if there are files for this date
-			if (filesWithDates.has(dateStr)) {
-				dayEl.addClass('calendar-day-has-files');
-				const fileCount = filesWithDates.get(dateStr)!.length;
-				dayEl.createEl('div', { text: d.getDate().toString(), cls: 'calendar-day-number' });
-				dayEl.createEl('div', { text: `${fileCount}`, cls: 'calendar-day-count' });
+		// Interaction
+		dayEl.addEventListener('click', (e) => {
+			e.stopPropagation();
+			if (this.selectedDate === day.dateStr) {
+				this.selectedDate = null;
 			} else {
-				dayEl.createEl('div', { text: d.getDate().toString(), cls: 'calendar-day-number' });
+				this.selectedDate = day.dateStr;
 			}
-
-			// Click handler
-			dayEl.addEventListener('click', () => {
-				if (this.selectedDate === dateStr) {
-					// Deselect if clicking on already selected date
-					this.selectedDate = null;
-				} else {
-					// Select new date
-					this.selectedDate = dateStr;
-				}
-				this.render();
-			});
-			
-			dayIndex++;
-		}
-		
-		// Auto-scroll to selected date if it exists and calendar is scrollable
-		if (selectedDateElement && this.selectedDate) {
-			setTimeout(() => {
-				if (selectedDateElement) {
-					this.scrollToSelectedDate(grid, selectedDateElement);
-				}
-			}, 50); // Small delay to ensure rendering is complete
-		}
+			this.render();
+		});
 	}
 
-	renderFileList(container: HTMLElement, filesWithDates: Map<string, TFile[]>) {
-		const fileListContainer = container.createEl('div', { cls: 'calendar-file-list' });
+	renderFileList(container: HTMLElement) {
+		const fileSection = container.createEl('div', { cls: 'calendar-file-section' });
+		
+		// Header with Create Button
+		const header = fileSection.createEl('div', { cls: 'file-section-header' });
+		header.createEl('h5', { text: this.formatSelectedDate() });
+		
+		const createBtn = header.createEl('button', { 
+text: '+', 
+cls: 'calendar-create-btn',
+title: 'Create Note'
+});
+		createBtn.addEventListener('click', () => {
+			this.createNoteForDate(this.selectedDate!);
+		});
 
-		const files = filesWithDates.get(this.selectedDate!) || [];
+		// List
+		const files = this.filesMap.get(this.selectedDate!) || [];
 		
 		if (files.length === 0) {
-			fileListContainer.createEl('p', { text: 'No files for this date' });
+			fileSection.createEl('div', { text: 'No notes', cls: 'empty-state' });
 		} else {
-			const fileList = fileListContainer.createEl('ul', { cls: 'calendar-files calendar-files-scrollable' });
-			
+			const list = fileSection.createEl('div', { cls: 'file-list' });
 			files.forEach(file => {
-				const listItem = fileList.createEl('li', { cls: 'calendar-file-item' });
+				const item = list.createEl('div', { cls: 'file-item' });
 				
-				const link = listItem.createEl('a', { 
-					text: file.basename,
-					cls: 'calendar-file-link'
-				});
+				// Icon
+				item.createEl('span', { cls: 'file-icon', text: '📄' });
 				
-				link.addEventListener('click', (e: MouseEvent) => {
-					e.preventDefault();
+				// Name
+				const name = item.createEl('span', { text: file.basename, cls: 'file-name' });
+				
+				item.addEventListener('click', () => {
 					this.app.workspace.openLinkText(file.path, '', false);
 				});
 			});
 		}
 	}
 
-	scrollToSelectedDate(grid: HTMLElement, selectedElement: HTMLElement) {
-		// Check if the calendar grid is scrollable
-		if (grid.scrollHeight <= grid.clientHeight) {
-			return; // No need to scroll if everything is visible
-		}
-
-		// Get the position of the selected element relative to the grid
-		const gridRect = grid.getBoundingClientRect();
-		const elementRect = selectedElement.getBoundingClientRect();
-		
-		// Calculate if the selected element is visible
-		const isVisible = (
-			elementRect.top >= gridRect.top &&
-			elementRect.bottom <= gridRect.bottom
-		);
-
-		// Only scroll if the selected element is not fully visible
-		if (!isVisible) {
-			// Calculate the scroll position to center the selected element
-			const elementTop = selectedElement.offsetTop;
-			const gridHeight = grid.clientHeight;
-			const elementHeight = selectedElement.offsetHeight;
-			
-			// Scroll to center the selected element (or as close as possible)
-			const scrollTop = Math.max(0, elementTop - (gridHeight / 2) + (elementHeight / 2));
-			
-			grid.scrollTo({
-				top: scrollTop,
-				behavior: 'smooth'
-			});
-		}
-	}
-
-	getFilesWithDates(): Map<string, TFile[]> {
-		const filesWithDates = new Map<string, TFile[]>();
-		const files = this.app.vault.getMarkdownFiles();
-		
-		for (const file of files) {
-			const cache = this.app.metadataCache.getFileCache(file);
-			if (!cache) continue;
-
-			// Check if file has the required tag
-			if (!this.hasRequiredTag(cache)) continue;
-
-			// Get date from frontmatter
-			const dateStr = this.getDateFromFrontmatter(cache);
-			if (!dateStr) continue;
-
-			// Normalize date string
-			const normalizedDate = this.normalizeDate(dateStr);
-			if (!normalizedDate) continue;
-
-			if (!filesWithDates.has(normalizedDate)) {
-				filesWithDates.set(normalizedDate, []);
-			}
-			filesWithDates.get(normalizedDate)!.push(file);
-		}
-
-		return filesWithDates;
-	}
-
-	hasRequiredTag(cache: CachedMetadata): boolean {
-		const requiredTag = this.plugin.settings.tagFilter;
-		
-		// Check inline tags
-		if (cache.tags) {
-			const hasInlineTag = cache.tags.some(tag => tag.tag === `#${requiredTag}`);
-			if (hasInlineTag) return true;
-		}
-		
-		// Check frontmatter tags
-		if (cache.frontmatter && cache.frontmatter.tags) {
-			const frontmatterTags = cache.frontmatter.tags;
-			if (Array.isArray(frontmatterTags)) {
-				return frontmatterTags.includes(requiredTag);
-			} else if (typeof frontmatterTags === 'string') {
-				return frontmatterTags === requiredTag;
-			}
-		}
-		
-		return false;
-	}
-
-	getDateFromFrontmatter(cache: CachedMetadata): string | null {
-		if (!cache.frontmatter) return null;
-		
-		const dateProperty = this.plugin.settings.dateProperty;
-		const dateValue = cache.frontmatter[dateProperty];
-		
-		if (!dateValue) return null;
-		
-		return dateValue.toString();
-	}
-
-	normalizeDate(dateStr: string): string | null {
-		try {
-			// Parse the date string and ensure we treat it as local time
-			const date = new Date(dateStr + 'T00:00:00'); // Force local time interpretation
-			if (isNaN(date.getTime())) return null;
-			return this.formatDate(date);
-		} catch {
-			return null;
-		}
-	}
-
-	formatDate(date: Date): string {
-		// Use local time methods to avoid timezone issues
-		const year = date.getFullYear();
-		const month = String(date.getMonth() + 1).padStart(2, '0');
-		const day = String(date.getDate()).padStart(2, '0');
-		return `${year}-${month}-${day}`;
-	}
-
-	isToday(date: Date): boolean {
-		const today = new Date();
-		return date.toDateString() === today.toDateString();
+	formatSelectedDate(): string {
+		if (!this.selectedDate) return '';
+		const date = new Date(this.selectedDate + 'T00:00:00');
+		return date.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
 	}
 
 	async createNoteForDate(dateStr: string): Promise<void> {
@@ -333,7 +215,7 @@ export class CalendarView extends ItemView {
 		const settings = this.plugin.settings;
 		
 		// Format date for title
-		const formattedDate = this.formatDateForTitle(date, settings.dateFormat);
+		const formattedDate = this.core.formatDateForTitle(date, settings.dateFormat);
 		
 		// Generate note title
 		const noteTitle = `Calendar Note - ${formattedDate}`;
@@ -378,26 +260,7 @@ export class CalendarView extends ItemView {
 			setTimeout(() => this.refresh(), 200);
 		} catch (error) {
 			console.error('Failed to create note:', error);
-			// You could show a notice to the user here if needed
 		}
-	}
-
-	formatDateForTitle(date: Date, format: string): string {
-		// Simple date formatting - you could use a library like moment.js for more complex formats
-		const year = date.getFullYear();
-		const month = String(date.getMonth() + 1).padStart(2, '0');
-		const day = String(date.getDate()).padStart(2, '0');
-		const monthName = date.toLocaleDateString('en-US', { month: 'long' });
-		const shortMonthName = date.toLocaleDateString('en-US', { month: 'short' });
-		const dayName = date.toLocaleDateString('en-US', { weekday: 'long' });
-		
-		return format
-			.replace(/YYYY/g, year.toString())
-			.replace(/MM/g, month)
-			.replace(/DD/g, day)
-			.replace(/MMMM/g, monthName)
-			.replace(/MMM/g, shortMonthName)
-			.replace(/dddd/g, dayName);
 	}
 
 	generateNoteContent(title: string, formattedDate: string, dateStr: string, settings: any): string {

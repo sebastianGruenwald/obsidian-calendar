@@ -1,9 +1,9 @@
 {
 	"id": "calendar-view-plugin",
-	"name": "Calendar View Plugin",
-	"version": "1.0.2",
-	"minAppVersion": "0.15.0",
-	"description": "Creates a calendar view from pages with specific tags, linking to dates via frontmatter properties",
+	"name": "Calendar View",
+	"version": "2.0.0",
+	"minAppVersion": "1.0.0",
+	"description": "Modern calendar view for Obsidian - display and manage notes by date with a beautiful, responsive interface",
 	"author": "Waschtlgrea",
 	"authorUrl": "https://gitlab.com/sebastianGruenwald",
 	"fundingUrl": "",
