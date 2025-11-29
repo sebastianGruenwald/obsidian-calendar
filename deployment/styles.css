@@ -431,14 +431,72 @@
    File List Section
    ============================================ */
 
+/* Resizable Divider */
+.cal-resizer {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 12px;
+  cursor: row-resize;
+  user-select: none;
+  position: relative;
+  margin: 4px 0;
+}
+
+.cal-resizer::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+  background: var(--cal-border);
+  transition: background var(--cal-transition-fast);
+}
+
+.cal-resizer:hover::before,
+.cal-resizing .cal-resizer::before {
+  background: var(--cal-accent);
+}
+
+.cal-resizer-handle {
+  width: 48px;
+  height: 4px;
+  border-radius: var(--cal-radius-full);
+  background: var(--cal-border);
+  transition: all var(--cal-transition-fast);
+  z-index: 1;
+}
+
+.cal-resizer:hover .cal-resizer-handle,
+.cal-resizing .cal-resizer-handle {
+  background: var(--cal-accent);
+  width: 64px;
+}
+
+.cal-resizer:active .cal-resizer-handle {
+  transform: scaleY(1.5);
+}
+
+/* Prevent text selection while resizing */
+.cal-resizing {
+  user-select: none;
+}
+
+.cal-resizing * {
+  cursor: row-resize !important;
+}
+
 .cal-files {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
   max-height: 45%;
-  border-top: 1px solid var(--cal-border);
-  padding-top: 16px;
+  min-height: 100px;
+  padding-top: 8px;
   animation: slideUp var(--cal-transition-slow) ease;
+  overflow: hidden;
 }
 
 @keyframes slideUp {

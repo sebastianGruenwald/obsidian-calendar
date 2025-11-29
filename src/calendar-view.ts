@@ -11,6 +11,9 @@ interface CalendarPlugin {
 	settings: CalendarPluginSettings;
 }
 
+// Storage key for persisting the divider position
+const DIVIDER_POSITION_KEY = 'calendar-view-divider-position';
+
 /**
  * Modern Calendar View for Obsidian
  */
@@ -26,7 +29,12 @@ export class CalendarView extends ItemView {
 	// DOM References for efficient updates
 	private headerEl: HTMLElement | null = null;
 	private calendarEl: HTMLElement | null = null;
+	private resizerEl: HTMLElement | null = null;
 	private fileListEl: HTMLElement | null = null;
+
+	// Resizer state
+	private isResizing = false;
+	private fileListHeight: number | null = null;
 
 	constructor(leaf: WorkspaceLeaf, plugin: CalendarPlugin) {
 		super(leaf);
@@ -63,9 +71,13 @@ export class CalendarView extends ItemView {
 	}
 
 	async onClose(): Promise<void> {
+		// Save divider position before closing
+		this.saveDividerPosition();
+		
 		// Cleanup
 		this.headerEl = null;
 		this.calendarEl = null;
+		this.resizerEl = null;
 		this.fileListEl = null;
 	}
 
@@ -79,9 +91,18 @@ export class CalendarView extends ItemView {
 		// Calendar container
 		this.calendarEl = this.viewContainerEl.createEl('div', { cls: 'cal-body' });
 		
+		// Resizable divider
+		this.resizerEl = this.viewContainerEl.createEl('div', { cls: 'cal-resizer' });
+		this.resizerEl.createEl('div', { cls: 'cal-resizer-handle' });
+		this.resizerEl.style.display = 'none';
+		this.setupResizer();
+		
 		// File list container (hidden initially)
 		this.fileListEl = this.viewContainerEl.createEl('div', { cls: 'cal-files' });
 		this.fileListEl.style.display = 'none';
+		
+		// Load saved divider position
+		this.loadDividerPosition();
 	}
 
 	/**
@@ -332,16 +353,25 @@ export class CalendarView extends ItemView {
 	 * Render the file list for selected date
 	 */
 	private renderFileList(): void {
-		if (!this.fileListEl) return;
+		if (!this.fileListEl || !this.resizerEl) return;
 
 		if (!this.selectedDate) {
 			this.fileListEl.style.display = 'none';
+			this.resizerEl.style.display = 'none';
+			this.fileListEl.style.height = '';
 			return;
 		}
 
 		this.fileListEl.style.display = 'flex';
+		this.resizerEl.style.display = 'flex';
 		this.fileListEl.empty();
 		this.fileListEl.addClass('cal-files-visible');
+		
+		// Apply saved height if available
+		if (this.fileListHeight !== null) {
+			this.fileListEl.style.height = `${this.fileListHeight}px`;
+			this.fileListEl.style.maxHeight = 'none';
+		}
 
 		// Header
 		const header = this.fileListEl.createEl('div', { cls: 'cal-files-header' });
@@ -525,6 +555,109 @@ export class CalendarView extends ItemView {
 		const folder = this.app.vault.getAbstractFileByPath(folderPath);
 		if (!folder) {
 			await this.app.vault.createFolder(folderPath);
+		}
+	}
+
+	/**
+	 * Setup the resizable divider
+	 */
+	private setupResizer(): void {
+		if (!this.resizerEl) return;
+
+		const onMouseDown = (e: MouseEvent) => {
+			e.preventDefault();
+			this.isResizing = true;
+			this.viewContainerEl.addClass('cal-resizing');
+			
+			document.addEventListener('mousemove', onMouseMove);
+			document.addEventListener('mouseup', onMouseUp);
+		};
+
+		const onMouseMove = (e: MouseEvent) => {
+			if (!this.isResizing || !this.fileListEl || !this.viewContainerEl) return;
+			
+			const containerRect = this.viewContainerEl.getBoundingClientRect();
+			const newHeight = containerRect.bottom - e.clientY;
+			
+			// Clamp between min and max heights
+			const minHeight = 100;
+			const maxHeight = containerRect.height - 200; // Leave space for calendar
+			const clampedHeight = Math.max(minHeight, Math.min(maxHeight, newHeight));
+			
+			this.fileListHeight = clampedHeight;
+			this.fileListEl.style.height = `${clampedHeight}px`;
+			this.fileListEl.style.maxHeight = 'none';
+		};
+
+		const onMouseUp = () => {
+			this.isResizing = false;
+			this.viewContainerEl.removeClass('cal-resizing');
+			
+			document.removeEventListener('mousemove', onMouseMove);
+			document.removeEventListener('mouseup', onMouseUp);
+			
+			// Save position
+			this.saveDividerPosition();
+		};
+
+		this.resizerEl.addEventListener('mousedown', onMouseDown);
+
+		// Touch support for mobile
+		const onTouchStart = (e: TouchEvent) => {
+			e.preventDefault();
+			this.isResizing = true;
+			this.viewContainerEl.addClass('cal-resizing');
+			
+			document.addEventListener('touchmove', onTouchMove, { passive: false });
+			document.addEventListener('touchend', onTouchEnd);
+		};
+
+		const onTouchMove = (e: TouchEvent) => {
+			if (!this.isResizing || !this.fileListEl || !this.viewContainerEl) return;
+			e.preventDefault();
+			
+			const touch = e.touches[0];
+			const containerRect = this.viewContainerEl.getBoundingClientRect();
+			const newHeight = containerRect.bottom - touch.clientY;
+			
+			const minHeight = 100;
+			const maxHeight = containerRect.height - 200;
+			const clampedHeight = Math.max(minHeight, Math.min(maxHeight, newHeight));
+			
+			this.fileListHeight = clampedHeight;
+			this.fileListEl.style.height = `${clampedHeight}px`;
+			this.fileListEl.style.maxHeight = 'none';
+		};
+
+		const onTouchEnd = () => {
+			this.isResizing = false;
+			this.viewContainerEl.removeClass('cal-resizing');
+			
+			document.removeEventListener('touchmove', onTouchMove);
+			document.removeEventListener('touchend', onTouchEnd);
+			
+			this.saveDividerPosition();
+		};
+
+		this.resizerEl.addEventListener('touchstart', onTouchStart, { passive: false });
+	}
+
+	/**
+	 * Save the divider position to localStorage
+	 */
+	private saveDividerPosition(): void {
+		if (this.fileListHeight !== null) {
+			localStorage.setItem(DIVIDER_POSITION_KEY, this.fileListHeight.toString());
+		}
+	}
+
+	/**
+	 * Load the divider position from localStorage
+	 */
+	private loadDividerPosition(): void {
+		const saved = localStorage.getItem(DIVIDER_POSITION_KEY);
+		if (saved) {
+			this.fileListHeight = parseInt(saved, 10);
 		}
 	}
 }
