@@ -4,7 +4,7 @@
 	"version": "1.0.0",
 	"minAppVersion": "0.15.0",
 	"description": "Creates a calendar view from pages with specific tags, linking to dates via frontmatter properties",
-	"author": "Your Name",
+	"author": "Sebastian Gruenwald",
 	"authorUrl": "",
 	"fundingUrl": "",
 	"isDesktopOnly": false
