@@ -14,6 +14,10 @@ interface CalendarPlugin {
 // Storage key for persisting the divider position
 const DIVIDER_POSITION_KEY = 'calendar-view-divider-position';
 
+// Minimum width/height thresholds for expanded view
+const EXPANDED_VIEW_MIN_WIDTH = 350;
+const EXPANDED_VIEW_MIN_HEIGHT = 400;
+
 /**
  * Modern Calendar View for Obsidian
  */
@@ -35,6 +39,10 @@ export class CalendarView extends ItemView {
 	// Resizer state
 	private isResizing = false;
 	private fileListHeight: number | null = null;
+
+	// Adaptive display mode
+	private isExpandedMode = false;
+	private resizeObserver: ResizeObserver | null = null;
 
 	constructor(leaf: WorkspaceLeaf, plugin: CalendarPlugin) {
 		super(leaf);
@@ -67,12 +75,19 @@ export class CalendarView extends ItemView {
 		}
 
 		this.buildStructure();
+		this.setupResizeObserver();
 		this.refresh();
 	}
 
 	async onClose(): Promise<void> {
 		// Save divider position before closing
 		this.saveDividerPosition();
+		
+		// Cleanup resize observer
+		if (this.resizeObserver) {
+			this.resizeObserver.disconnect();
+			this.resizeObserver = null;
+		}
 		
 		// Cleanup
 		this.headerEl = null;
@@ -150,6 +165,16 @@ export class CalendarView extends ItemView {
 		// Navigation
 		const navSection = topRow.createEl('div', { cls: 'cal-nav' });
 
+		// Create note button (only show when date is selected)
+		if (this.selectedDate) {
+			const createBtn = navSection.createEl('button', { 
+				cls: 'cal-btn cal-btn-icon cal-btn-create-header',
+				attr: { 'aria-label': 'Create new note for selected date' }
+			});
+			setIcon(createBtn, 'plus');
+			createBtn.addEventListener('click', () => this.createNote());
+		}
+
 		// Today button
 		const todayBtn = navSection.createEl('button', { 
 			cls: 'cal-btn cal-btn-today',
@@ -172,9 +197,6 @@ export class CalendarView extends ItemView {
 		});
 		setIcon(nextBtn, 'chevron-right');
 		nextBtn.addEventListener('click', () => this.navigateNext());
-
-		// View mode toggle (optional, can be enabled via settings)
-		// const viewToggle = this.createViewToggle(navSection);
 	}
 
 	/**
@@ -209,6 +231,9 @@ export class CalendarView extends ItemView {
 		} else {
 			this.renderWeekView(daysGrid);
 		}
+
+		// Auto-scroll to selected day if not fully visible
+		this.scrollToSelectedDay(daysGrid);
 	}
 
 	/**
@@ -263,6 +288,7 @@ export class CalendarView extends ItemView {
 		if (day.isWeekend) classes.push('cal-day-weekend');
 		if (day.dateStr === this.selectedDate) classes.push('cal-day-selected');
 		if (day.files.length > 0) classes.push('cal-day-has-events');
+		if (this.isExpandedMode) classes.push('cal-day-inline-events');
 		
 		const dayEl = container.createEl('div', { cls: classes.join(' ') });
 		dayEl.setAttribute('data-date', day.dateStr);
@@ -271,28 +297,72 @@ export class CalendarView extends ItemView {
 		const dateNum = dayEl.createEl('div', { cls: 'cal-day-num' });
 		dateNum.createEl('span', { text: day.date.getDate().toString() });
 
-		// Event indicators
+		// Events display - depends on mode
 		if (day.files.length > 0) {
-			const indicators = dayEl.createEl('div', { cls: 'cal-day-indicators' });
-			const count = Math.min(day.files.length, 3);
-			
-			for (let i = 0; i < count; i++) {
-				indicators.createEl('span', { cls: 'cal-indicator' });
-			}
-			
-			if (day.files.length > 3) {
-				indicators.createEl('span', { 
-					cls: 'cal-indicator-more',
-					text: `+${day.files.length - 3}`
-				});
+			if (this.isExpandedMode) {
+				// Expanded mode: show event titles inline
+				this.renderInlineEvents(dayEl, day);
+			} else {
+				// Compact mode: show dots
+				const indicators = dayEl.createEl('div', { cls: 'cal-day-indicators' });
+				const count = Math.min(day.files.length, 3);
+				
+				for (let i = 0; i < count; i++) {
+					indicators.createEl('span', { cls: 'cal-indicator' });
+				}
+				
+				if (day.files.length > 3) {
+					indicators.createEl('span', { 
+						cls: 'cal-indicator-more',
+						text: `+${day.files.length - 3}`
+					});
+				}
 			}
 		}
 
 		// Click handler
 		dayEl.addEventListener('click', (e) => {
+			// Don't toggle selection if clicking on an event
+			if ((e.target as HTMLElement).closest('.cal-inline-event')) return;
 			e.stopPropagation();
 			this.selectDate(day.dateStr);
 		});
+	}
+
+	/**
+	 * Render inline events for expanded mode
+	 */
+	private renderInlineEvents(dayEl: HTMLElement, day: CalendarDate): void {
+		const eventsContainer = dayEl.createEl('div', { cls: 'cal-inline-events' });
+		
+		// Calculate how many events we can show based on available space
+		// We'll show 2-3 events max in inline mode
+		const maxVisible = 3;
+		const visibleFiles = day.files.slice(0, maxVisible);
+		const remaining = day.files.length - maxVisible;
+		
+		visibleFiles.forEach(file => {
+			const eventEl = eventsContainer.createEl('div', { 
+				cls: 'cal-inline-event',
+				attr: { 'title': file.basename }
+			});
+			eventEl.createEl('span', { 
+				cls: 'cal-inline-event-text',
+				text: file.basename 
+			});
+			
+			eventEl.addEventListener('click', (e) => {
+				e.stopPropagation();
+				this.openFile(file);
+			});
+		});
+		
+		if (remaining > 0) {
+			eventsContainer.createEl('div', { 
+				cls: 'cal-inline-event-more',
+				text: `+${remaining} more`
+			});
+		}
 	}
 
 	/**
@@ -373,59 +443,27 @@ export class CalendarView extends ItemView {
 			this.fileListEl.style.maxHeight = 'none';
 		}
 
-		// Header
-		const header = this.fileListEl.createEl('div', { cls: 'cal-files-header' });
-		
-		const titleGroup = header.createEl('div', { cls: 'cal-files-title-group' });
-		titleGroup.createEl('h3', { 
-			text: DateUtils.formatSelectedDate(this.selectedDate),
-			cls: 'cal-files-title'
-		});
-
-		// Create note button
-		const createBtn = header.createEl('button', { 
-			cls: 'cal-btn cal-btn-create',
-			attr: { 'aria-label': 'Create new note' }
-		});
-		setIcon(createBtn, 'plus');
-		createBtn.createEl('span', { text: 'New Note' });
-		createBtn.addEventListener('click', () => this.createNote());
-
-		// File list
+		// File list - compact style like inline events
 		const files = this.filesMap.get(this.selectedDate) || [];
 		
 		if (files.length === 0) {
-			const emptyState = this.fileListEl.createEl('div', { cls: 'cal-files-empty' });
-			emptyState.createEl('div', { cls: 'cal-files-empty-icon' });
-			setIcon(emptyState.querySelector('.cal-files-empty-icon')!, 'calendar');
-			emptyState.createEl('p', { text: 'No notes for this date' });
-			emptyState.createEl('button', { 
-				cls: 'cal-btn cal-btn-secondary',
-				text: 'Create one'
-			}).addEventListener('click', () => this.createNote());
+			const emptyState = this.fileListEl.createEl('div', { cls: 'cal-files-empty-compact' });
+			emptyState.createEl('span', { 
+				text: 'No notes',
+				cls: 'cal-files-empty-text'
+			});
 		} else {
-			const list = this.fileListEl.createEl('div', { cls: 'cal-files-list' });
+			const list = this.fileListEl.createEl('div', { cls: 'cal-files-list-compact' });
 			
 			files.forEach(file => {
-				const item = list.createEl('div', { cls: 'cal-file-item' });
-				
-				const iconEl = item.createEl('div', { cls: 'cal-file-icon' });
-				setIcon(iconEl, 'file-text');
-				
-				const content = item.createEl('div', { cls: 'cal-file-content' });
-				content.createEl('div', { 
-					cls: 'cal-file-name',
-					text: file.basename
+				const item = list.createEl('div', { 
+					cls: 'cal-file-item-compact',
+					attr: { 'title': file.path }
 				});
-				
-				// Show file path if in subfolder
-				if (file.parent && file.parent.path !== '/') {
-					content.createEl('div', { 
-						cls: 'cal-file-path',
-						text: file.parent.path
-					});
-				}
-
+				item.createEl('span', { 
+					cls: 'cal-file-item-text',
+					text: file.basename 
+				});
 				item.addEventListener('click', () => this.openFile(file));
 			});
 		}
@@ -456,6 +494,31 @@ export class CalendarView extends ItemView {
 			this.currentDate = DateUtils.addDays(this.currentDate, 7);
 		}
 		this.render();
+	}
+
+	/**
+	 * Scroll to selected day if it's not visible
+	 */
+	private scrollToSelectedDay(container: HTMLElement): void {
+		if (!this.selectedDate) return;
+		
+		// Use setTimeout to ensure DOM is rendered
+		setTimeout(() => {
+			const selectedEl = container.querySelector(`[data-date="${this.selectedDate}"]`) as HTMLElement;
+			if (!selectedEl) return;
+			
+			// Check if element is visible in the scrollable container
+			const containerRect = container.getBoundingClientRect();
+			const elementRect = selectedEl.getBoundingClientRect();
+			
+			const isVisible = 
+				elementRect.top >= containerRect.top &&
+				elementRect.bottom <= containerRect.bottom;
+			
+			if (!isVisible) {
+				selectedEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+			}
+		}, 10);
 	}
 
 	/**
@@ -580,7 +643,7 @@ export class CalendarView extends ItemView {
 			const newHeight = containerRect.bottom - e.clientY;
 			
 			// Clamp between min and max heights
-			const minHeight = 100;
+			const minHeight = 30;
 			const maxHeight = containerRect.height - 200; // Leave space for calendar
 			const clampedHeight = Math.max(minHeight, Math.min(maxHeight, newHeight));
 			
@@ -620,7 +683,7 @@ export class CalendarView extends ItemView {
 			const containerRect = this.viewContainerEl.getBoundingClientRect();
 			const newHeight = containerRect.bottom - touch.clientY;
 			
-			const minHeight = 100;
+			const minHeight = 30;
 			const maxHeight = containerRect.height - 200;
 			const clampedHeight = Math.max(minHeight, Math.min(maxHeight, newHeight));
 			
@@ -658,6 +721,51 @@ export class CalendarView extends ItemView {
 		const saved = localStorage.getItem(DIVIDER_POSITION_KEY);
 		if (saved) {
 			this.fileListHeight = parseInt(saved, 10);
+		}
+	}
+
+	/**
+	 * Setup resize observer for adaptive view switching
+	 */
+	private setupResizeObserver(): void {
+		const handleResize = (entries: ResizeObserverEntry[]) => {
+			const entry = entries[0];
+			if (!entry) return;
+			
+			const { width, height } = entry.contentRect;
+			const shouldBeExpanded = width >= EXPANDED_VIEW_MIN_WIDTH && height >= EXPANDED_VIEW_MIN_HEIGHT;
+			
+			// Only re-render if mode actually changed
+			if (shouldBeExpanded !== this.isExpandedMode) {
+				this.isExpandedMode = shouldBeExpanded;
+				this.updateExpandedModeClass();
+				this.renderCalendar();
+			}
+		};
+		
+		let resizeTimeout: ReturnType<typeof setTimeout>;
+		const debouncedResize = (entries: ResizeObserverEntry[]) => {
+			clearTimeout(resizeTimeout);
+			resizeTimeout = setTimeout(() => handleResize(entries), 100);
+		};
+		
+		this.resizeObserver = new ResizeObserver(debouncedResize);
+		this.resizeObserver.observe(this.viewContainerEl);
+		
+		// Initial check
+		const rect = this.viewContainerEl.getBoundingClientRect();
+		this.isExpandedMode = rect.width >= EXPANDED_VIEW_MIN_WIDTH && rect.height >= EXPANDED_VIEW_MIN_HEIGHT;
+		this.updateExpandedModeClass();
+	}
+
+	/**
+	 * Update the expanded mode class on container
+	 */
+	private updateExpandedModeClass(): void {
+		if (this.isExpandedMode) {
+			this.viewContainerEl.addClass('cal-expanded-mode');
+		} else {
+			this.viewContainerEl.removeClass('cal-expanded-mode');
 		}
 	}
 }
