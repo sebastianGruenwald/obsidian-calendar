@@ -546,24 +546,16 @@ export class CalendarView extends ItemView {
 	private async createNote(): Promise<void> {
 		if (!this.selectedDate) return;
 
-		const date = DateUtils.fromDateString(this.selectedDate);
 		const settings = this.plugin.settings;
 		
-		const formattedDate = this.core.formatDateForTitle(date);
-		const noteTitle = `Calendar Note - ${formattedDate}`;
-		const fileName = `${noteTitle.replace(/[^\w\s-]/g, '')}.md`;
+		// Generate unique filename with timestamp
+		const timestamp = Date.now();
+		const fileName = `Untitled ${timestamp}.md`;
 		
 		const folder = settings.noteFolder.trim();
 		const fullPath = folder ? `${folder}/${fileName}` : fileName;
 		
-		// Check if exists
-		const existingFile = this.app.vault.getAbstractFileByPath(fullPath);
-		if (existingFile) {
-			this.app.workspace.openLinkText(fullPath, '', false);
-			return;
-		}
-		
-		// Generate content
+		// Generate content (only frontmatter)
 		const content = this.generateNoteContent(this.selectedDate);
 		
 		try {
@@ -576,10 +568,20 @@ export class CalendarView extends ItemView {
 			const newFile = await this.app.vault.create(fullPath, content);
 			
 			// Open file
-			await this.app.workspace.openLinkText(newFile.path, '', false);
+			const leaf = await this.app.workspace.getLeaf(false);
+			await leaf.openFile(newFile);
+			
+			// Trigger rename to focus on title
+			setTimeout(() => {
+				const fileExplorer = this.app.workspace.getLeavesOfType('file-explorer')[0];
+				if (fileExplorer) {
+					// Use the app's built-in file rename command
+					(this.app as any).commands.executeCommandById('workspace:edit-file-title');
+				}
+			}, 100);
 			
 			// Refresh after a short delay
-			setTimeout(() => this.refresh(), 200);
+			setTimeout(() => this.refresh(), 300);
 		} catch (error) {
 			console.error('Failed to create note:', error);
 		}
@@ -590,10 +592,8 @@ export class CalendarView extends ItemView {
 	 */
 	private generateNoteContent(dateStr: string): string {
 		const settings = this.plugin.settings;
-		const date = DateUtils.fromDateString(dateStr);
-		const formattedDate = DateUtils.formatDate(date, settings.dateFormat);
 		
-		// Frontmatter
+		// Frontmatter only
 		const frontmatter = [
 			'---',
 			`${settings.dateProperty}: ${dateStr}`,
@@ -603,12 +603,7 @@ export class CalendarView extends ItemView {
 			''
 		].join('\n');
 		
-		// Apply template
-		let content = settings.noteTemplate
-			.replace(/\{\{title\}\}/g, `Calendar Note - ${formattedDate}`)
-			.replace(/\{\{date\}\}/g, formattedDate);
-		
-		return frontmatter + '\n' + content;
+		return frontmatter;
 	}
 
 	/**
