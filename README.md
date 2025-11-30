@@ -1,19 +1,37 @@
 # Calendar View Plugin
 
-A modern, beautiful calendar view plugin for Obsidian that displays and manages your notes by date.
+A modern, beautiful calendar view plugin for Obsidian that displays and manages your notes by date. Features recurring events, event colors, time support, search, multiple view modes, and more.
 
 ![Calendar View](https://img.shields.io/badge/version-2.0.0-blue)
 ![Obsidian](https://img.shields.io/badge/Obsidian-1.0.0+-purple)
 
 ## ✨ Features
 
+### Core Features
 - **Modern UI**: Clean, responsive design with smooth animations
 - **Tag-based filtering**: Display only pages with a specific tag (e.g., `#calendar`)
+- **Multiple tags**: Filter by multiple tags with AND/OR logic
 - **Flexible date property**: Use any frontmatter property to specify dates
 - **Interactive calendar**: Click on dates to view and manage associated notes
 - **Quick note creation**: Create new notes directly from the calendar
+- **Search & Filter**: Real-time search across event titles
+
+### View Modes
+- **Month View**: Traditional monthly calendar grid
+- **Week View**: Expanded view of the current week with event details
+- **Day View**: Timeline view with hourly breakdown
+
+### Event Features
+- **Event Colors**: Assign colors to events via frontmatter
+- **Time Support**: Display event times from frontmatter
+- **Recurring Events**: Support for daily, weekly, monthly, and yearly recurrence
+- **Date Ranges**: Events can span multiple days with start and end dates
+- **Hover Preview**: Preview note content on hover
+
+### Customization
 - **Week numbers**: Optional ISO week number display
 - **Customizable week start**: Choose Sunday or Monday as the first day
+- **Locale support**: Display dates in your preferred language
 - **Theme integration**: Automatically adapts to your Obsidian theme
 - **Custom accent color**: Personalize the calendar's accent color
 - **Auto-refresh**: Automatically updates when files change
@@ -54,23 +72,48 @@ npm run dev
 2. Click the calendar icon in the ribbon or use the command palette
 3. Configure settings to match your workflow
 
-### Settings
+### Settings Overview
 
+#### Data Settings
 | Setting | Description | Default |
 |---------|-------------|---------|
-| Tag Filter | Tag to filter pages by (without #) | `calendar` |
+| Tag Filter | Tag(s) to filter pages by (without #) | `calendar` |
+| Multiple Tags | Enable filtering by multiple tags | Off |
+| Tag Filter Mode | How multiple tags are matched (AND/OR) | AND |
 | Date Property | Frontmatter property containing the date | `date` |
+
+#### Time & Recurrence
+| Setting | Description | Default |
+|---------|-------------|---------|
+| Enable Time | Show event times | Off |
+| Time Property | Frontmatter property for time | `time` |
+| Enable Recurring | Support recurring events | Off |
+| Recurring Property | Frontmatter property for recurrence | `recurring` |
+
+#### Date Ranges & Colors
+| Setting | Description | Default |
+|---------|-------------|---------|
+| Enable Date Ranges | Events can span multiple days | Off |
+| End Date Property | Frontmatter property for end date | `endDate` |
+| Enable Colors | Color-code events | Off |
+| Color Property | Frontmatter property for color | `color` |
+| Default Event Color | Default color for all events | Blue |
+
+#### Display Settings
+| Setting | Description | Default |
+|---------|-------------|---------|
 | Note Folder | Folder for new calendar notes | (vault root) |
 | Date Format | Format for dates in note titles | `YYYY-MM-DD` |
 | Note Template | Template for new notes | `# {{title}}...` |
+| Locale | Language for date formatting | en-US |
 | Week Starts On | First day of the week | Monday |
 | Show Week Numbers | Display ISO week numbers | Off |
+| Show Preview on Hover | Preview notes on hover | Off |
 | Accent Color | Custom accent color (hex) | (theme default) |
 
 ### Creating Calendar Notes
 
-Create notes with the specified tag and date property in the frontmatter:
-
+#### Basic Event
 ```markdown
 ---
 date: 2024-01-15
@@ -78,10 +121,77 @@ tags:
   - calendar
 ---
 
-# My Calendar Event
+# Team Meeting
 
 This note will appear on January 15, 2024 in the calendar view.
 ```
+
+#### Event with Time
+```markdown
+---
+date: 2024-01-15
+time: "14:30"
+tags:
+  - calendar
+---
+
+# Doctor Appointment
+
+Appears at 2:30 PM on January 15th.
+```
+
+#### Colored Event
+```markdown
+---
+date: 2024-01-15
+color: red
+tags:
+  - calendar
+---
+
+# Important Deadline
+
+This event will appear in red.
+```
+
+Available colors: `red`, `orange`, `yellow`, `green`, `blue`, `purple`, `pink`, `gray`
+
+#### Recurring Event
+```markdown
+---
+date: 2024-01-15
+recurring: weekly
+tags:
+  - calendar
+---
+
+# Weekly Standup
+
+Repeats every week starting January 15th.
+```
+
+Recurrence options: `daily`, `weekly`, `monthly`, `yearly`
+
+#### Multi-Day Event
+```markdown
+---
+date: 2024-01-15
+endDate: 2024-01-17
+tags:
+  - calendar
+---
+
+# Conference
+
+Spans from January 15th to 17th.
+```
+
+### Multiple Tags Filtering
+
+Enable "Multiple Tags" in settings, then specify tags comma-separated:
+
+- `calendar, meeting` with AND mode: Shows notes with BOTH tags
+- `calendar, meeting` with OR mode: Shows notes with EITHER tag
 
 ### Date Format Tokens
 
@@ -98,6 +208,16 @@ Use these tokens in the Date Format setting:
 | `dddd` | Full weekday | Monday |
 | `ddd` | Short weekday | Mon |
 
+### Supported Locales
+
+- English (US): `en-US`
+- English (UK): `en-GB`
+- German: `de-DE`
+- French: `fr-FR`
+- Spanish: `es-ES`
+- Japanese: `ja-JP`
+- Chinese: `zh-CN`
+
 ## 🛠️ Development
 
 ### Project Structure
@@ -107,6 +227,7 @@ src/
 ├── main.ts          # Plugin entry point and settings
 ├── calendar-view.ts # Main calendar view component
 ├── calendar-core.ts # Date calculations and file queries
+├── event-bus.ts     # Event bus for decoupled communication
 ├── types.ts         # TypeScript interfaces
 ├── utils.ts         # Utility functions
 └── styles.css       # Modern CSS styles
@@ -127,24 +248,38 @@ npm run clean    # Remove build artifacts
 - ESBuild for fast bundling
 - Modern CSS with CSS variables
 - Obsidian API
+- Event Bus pattern for component communication
 
 ## 📝 Changelog
 
 ### 2.0.0
 
-- Complete UI redesign with modern styling
-- Reorganized project structure with proper separation of concerns
-- Added week numbers support
-- Added configurable week start day (Sunday/Monday)
-- Added custom accent color setting
-- Added note template customization
-- Improved TypeScript strict mode support
-- Updated dependencies to latest versions
-- Performance improvements with debounced refresh
+**New Features:**
+- 🔍 **Search & Filter**: Real-time search across all events
+- 📅 **Multiple View Modes**: Month, Week, and Day views
+- 🎨 **Event Colors**: Color-code events via frontmatter
+- ⏰ **Time Support**: Display event times
+- 🔄 **Recurring Events**: Daily, weekly, monthly, yearly recurrence
+- 📆 **Date Ranges**: Multi-day event support
+- 👁️ **Hover Preview**: Preview note content on hover
+- 🏷️ **Multiple Tags**: Filter by multiple tags with AND/OR logic
+- 🌍 **Locale Support**: Display dates in your language
 
-### 1.0.x
+**Improvements:**
+- Complete UI redesign with modern styling
+- Event Bus architecture for better code organization
+- Reorganized project structure with proper separation of concerns
+- Settings validation with feedback
+- Enhanced TypeScript type safety
+- Performance improvements with caching and debouncing
+
+### 1.x.x
 
 - Initial release with basic calendar functionality
+- Week numbers support
+- Configurable week start day (Sunday/Monday)
+- Custom accent color setting
+- Note template customization
 
 ## 🤝 Contributing
 

@@ -1,7 +1,8 @@
 import { ItemView, WorkspaceLeaf, TFile, setIcon } from 'obsidian';
 import { CalendarCore } from './calendar-core';
-import { CalendarDate, CalendarViewMode, CalendarPluginSettings } from './types';
+import { CalendarDate, CalendarViewMode, CalendarPluginSettings, CalendarEvent } from './types';
 import { DateUtils, debounce } from './utils';
+import { eventBus } from './event-bus';
 
 export const VIEW_TYPE_CALENDAR = 'calendar-view';
 
@@ -26,15 +27,19 @@ export class CalendarView extends ItemView {
 	private core: CalendarCore;
 	private selectedDate: string | null = null;
 	private currentDate: Date;
-	private filesMap: Map<string, TFile[]> = new Map();
+	private eventsMap: Map<string, CalendarEvent[]> = new Map();
+	private filteredEventsMap: Map<string, CalendarEvent[]> = new Map();
 	private viewMode: CalendarViewMode = 'month';
 	private viewContainerEl!: HTMLElement;
+	private searchQuery: string = '';
+	private searchExpanded: boolean = false;
 
 	// DOM References for efficient updates
 	private headerEl: HTMLElement | null = null;
 	private calendarEl: HTMLElement | null = null;
 	private resizerEl: HTMLElement | null = null;
 	private fileListEl: HTMLElement | null = null;
+	private previewTooltip: HTMLElement | null = null;
 
 	// Resizer state
 	private isResizing = false;
@@ -44,12 +49,19 @@ export class CalendarView extends ItemView {
 	private isExpandedMode = false;
 	private resizeObserver: ResizeObserver | null = null;
 
+	// Event handlers for cleanup
+	private documentMouseMoveHandler: ((e: MouseEvent) => void) | null = null;
+	private documentMouseUpHandler: (() => void) | null = null;
+	private documentTouchMoveHandler: ((e: TouchEvent) => void) | null = null;
+	private documentTouchEndHandler: (() => void) | null = null;
+
 	constructor(leaf: WorkspaceLeaf, plugin: CalendarPlugin) {
 		super(leaf);
 		this.plugin = plugin;
 		this.core = new CalendarCore(plugin.app, plugin.settings);
 		this.currentDate = new Date();
 		this.viewMode = plugin.settings.defaultView;
+		DateUtils.setLocale(plugin.settings.locale);
 	}
 
 	getViewType(): string {
@@ -88,6 +100,26 @@ export class CalendarView extends ItemView {
 			this.resizeObserver.disconnect();
 			this.resizeObserver = null;
 		}
+
+		// Cleanup document event listeners
+		if (this.documentMouseMoveHandler) {
+			document.removeEventListener('mousemove', this.documentMouseMoveHandler);
+		}
+		if (this.documentMouseUpHandler) {
+			document.removeEventListener('mouseup', this.documentMouseUpHandler);
+		}
+		if (this.documentTouchMoveHandler) {
+			document.removeEventListener('touchmove', this.documentTouchMoveHandler);
+		}
+		if (this.documentTouchEndHandler) {
+			document.removeEventListener('touchend', this.documentTouchEndHandler);
+		}
+
+		// Remove preview tooltip
+		if (this.previewTooltip) {
+			this.previewTooltip.remove();
+			this.previewTooltip = null;
+		}
 		
 		// Cleanup
 		this.headerEl = null;
@@ -118,6 +150,107 @@ export class CalendarView extends ItemView {
 		
 		// Load saved divider position
 		this.loadDividerPosition();
+
+		// Create preview tooltip (hidden)
+		this.previewTooltip = document.body.createEl('div', { cls: 'cal-preview-tooltip' });
+		this.previewTooltip.style.display = 'none';
+	}
+
+	/**
+	 * Build the search bar (collapsible) into a container
+	 */
+	private buildSearchBar(container: HTMLElement): void {
+		const searchContainer = container.createEl('div', { 
+			cls: `cal-search-container ${this.searchExpanded ? 'cal-search-expanded' : 'cal-search-collapsed'}` 
+		});
+		
+		// Search icon/button
+		const searchIcon = searchContainer.createEl('button', { 
+			cls: 'cal-search-icon-btn',
+			attr: { 'aria-label': 'Search events' }
+		});
+		setIcon(searchIcon, 'search');
+		
+		// Input field (hidden when collapsed)
+		const searchInput = searchContainer.createEl('input', {
+			cls: 'cal-search-input',
+			attr: {
+				type: 'text',
+				placeholder: 'Search events...',
+				'aria-label': 'Search events'
+			}
+		});
+		searchInput.value = this.searchQuery;
+		
+		// Clear button
+		const clearBtn = searchContainer.createEl('button', { 
+			cls: 'cal-search-clear',
+			attr: { 'aria-label': 'Clear search' }
+		});
+		setIcon(clearBtn, 'x');
+		clearBtn.style.display = this.searchQuery ? 'flex' : 'none';
+		
+		// Handle search input
+		const handleSearch = debounce(() => {
+			this.searchQuery = searchInput.value;
+			clearBtn.style.display = this.searchQuery ? 'flex' : 'none';
+			this.applyFilter();
+			eventBus.emit('searchChanged', { query: this.searchQuery });
+		}, 200);
+		searchInput.addEventListener('input', handleSearch);
+
+		// Expand search on icon click
+		searchIcon.addEventListener('click', (e) => {
+			e.stopPropagation();
+			if (!this.searchExpanded) {
+				this.searchExpanded = true;
+				searchContainer.removeClass('cal-search-collapsed');
+				searchContainer.addClass('cal-search-expanded');
+				searchInput.focus();
+			}
+		});
+
+		// Clear and collapse
+		clearBtn.addEventListener('click', () => {
+			this.searchQuery = '';
+			searchInput.value = '';
+			clearBtn.style.display = 'none';
+			this.searchExpanded = false;
+			searchContainer.removeClass('cal-search-expanded');
+			searchContainer.addClass('cal-search-collapsed');
+			this.applyFilter();
+		});
+
+		// Collapse on blur if empty
+		searchInput.addEventListener('blur', () => {
+			if (!this.searchQuery) {
+				setTimeout(() => {
+					this.searchExpanded = false;
+					searchContainer.removeClass('cal-search-expanded');
+					searchContainer.addClass('cal-search-collapsed');
+				}, 150);
+			}
+		});
+
+		// Keep expanded if there's a query
+		if (this.searchQuery) {
+			this.searchExpanded = true;
+			searchContainer.removeClass('cal-search-collapsed');
+			searchContainer.addClass('cal-search-expanded');
+		}
+	}
+
+	/**
+	 * Apply search filter
+	 */
+	private applyFilter(): void {
+		if (this.searchQuery.trim()) {
+			this.filteredEventsMap = this.core.filterEvents(this.eventsMap, this.searchQuery);
+		} else {
+			this.filteredEventsMap = this.eventsMap;
+		}
+		this.renderCalendar();
+		this.renderFileList();
 	}
 
 	/**
@@ -125,7 +258,9 @@ export class CalendarView extends ItemView {
 	 */
 	refresh = debounce(() => {
 		this.core.updateSettings(this.plugin.settings);
-		this.filesMap = this.core.getFilesWithDates();
+		DateUtils.setLocale(this.plugin.settings.locale);
+		this.eventsMap = this.core.getEventsWithDates();
+		this.applyFilter();
 		this.render();
 	}, 100);
 
@@ -150,23 +285,59 @@ export class CalendarView extends ItemView {
 
 		// Month/Year title
 		const titleSection = topRow.createEl('div', { cls: 'cal-title-section' });
-		const monthName = DateUtils.getMonthName(this.currentDate);
-		const year = this.currentDate.getFullYear();
 		
-		titleSection.createEl('h2', { 
-			text: monthName, 
-			cls: 'cal-month-title' 
-		});
-		titleSection.createEl('span', { 
-			text: year.toString(), 
-			cls: 'cal-year' 
-		});
+		if (this.viewMode === 'day') {
+			// Day view: show full date
+			const formattedDate = DateUtils.formatSelectedDate(DateUtils.toDateString(this.currentDate));
+			titleSection.createEl('h2', { 
+				text: formattedDate, 
+				cls: 'cal-month-title cal-day-title' 
+			});
+		} else {
+			const monthName = DateUtils.getMonthName(this.currentDate);
+			const year = this.currentDate.getFullYear();
+			
+			titleSection.createEl('h2', { 
+				text: monthName, 
+				cls: 'cal-month-title' 
+			});
+			titleSection.createEl('span', { 
+				text: year.toString(), 
+				cls: 'cal-year' 
+			});
+		}
 
 		// Navigation
 		const navSection = topRow.createEl('div', { cls: 'cal-nav' });
 
-		// Create note button (only show when date is selected)
-		if (this.selectedDate) {
+		// View mode dropdown
+		const viewSelect = navSection.createEl('select', { 
+			cls: 'cal-view-select',
+			attr: { 'aria-label': 'Select view mode' }
+		});
+		
+		const viewOptions: { value: CalendarViewMode; label: string }[] = [
+			{ value: 'month', label: 'Month' },
+			{ value: 'week', label: 'Week' },
+			{ value: 'day', label: 'Day' }
+		];
+		
+		viewOptions.forEach(opt => {
+			const option = viewSelect.createEl('option', {
+				text: opt.label,
+				attr: { value: opt.value }
+			});
+			if (opt.value === this.viewMode) {
+				option.selected = true;
+			}
+		});
+		
+		viewSelect.addEventListener('change', () => {
+			this.setViewMode(viewSelect.value as CalendarViewMode);
+		});
+
+		// Create note button (only show when date is selected or in day view)
+		if (this.selectedDate || this.viewMode === 'day') {
 			const createBtn = navSection.createEl('button', { 
 				cls: 'cal-btn cal-btn-icon cal-btn-create-header',
 				attr: { 'aria-label': 'Create new note for selected date' }
@@ -186,17 +357,30 @@ export class CalendarView extends ItemView {
 		// Prev/Next buttons
 		const prevBtn = navSection.createEl('button', { 
 			cls: 'cal-btn cal-btn-icon',
-			attr: { 'aria-label': 'Previous month' }
+			attr: { 'aria-label': 'Previous' }
 		});
 		setIcon(prevBtn, 'chevron-left');
 		prevBtn.addEventListener('click', () => this.navigatePrevious());
 
 		const nextBtn = navSection.createEl('button', { 
 			cls: 'cal-btn cal-btn-icon',
-			attr: { 'aria-label': 'Next month' }
+			attr: { 'aria-label': 'Next' }
 		});
 		setIcon(nextBtn, 'chevron-right');
 		nextBtn.addEventListener('click', () => this.navigateNext());
+
+		// Search (collapsible)
+		this.buildSearchBar(navSection);
+	}
+
+	/**
+	 * Set view mode
+	 */
+	private setViewMode(mode: CalendarViewMode): void {
+		if (this.viewMode === mode) return;
+		this.viewMode = mode;
+		eventBus.emit('viewModeChanged', { mode });
+		this.render();
 	}
 
 	/**
@@ -205,6 +389,11 @@ export class CalendarView extends ItemView {
 	private renderCalendar(): void {
 		if (!this.calendarEl) return;
 		this.calendarEl.empty();
+
+		if (this.viewMode === 'day') {
+			this.renderDayView();
+			return;
+		}
 
 		// Weekday headers
 		const weekHeader = this.calendarEl.createEl('div', { cls: 'cal-weekdays' });
@@ -240,7 +429,7 @@ export class CalendarView extends ItemView {
 	 * Render month view
 	 */
 	private renderMonthView(container: HTMLElement): void {
-		const weeks = this.core.getWeeksForMonth(this.currentDate, this.filesMap);
+		const weeks = this.core.getWeeksForMonth(this.currentDate, this.filteredEventsMap);
 		
 		weeks.forEach(week => {
 			const weekRow = container.createEl('div', { cls: 'cal-week' });
@@ -262,7 +451,7 @@ export class CalendarView extends ItemView {
 	 * Render week view
 	 */
 	private renderWeekView(container: HTMLElement): void {
-		const days = this.core.getDaysForWeek(this.currentDate, this.filesMap);
+		const days = this.core.getDaysForWeek(this.currentDate, this.filteredEventsMap);
 		const weekRow = container.createEl('div', { cls: 'cal-week cal-week-expanded' });
 		
 		if (this.plugin.settings.showWeekNumbers && days.length > 0) {
@@ -278,6 +467,112 @@ export class CalendarView extends ItemView {
 	}
 
 	/**
+	 * Render day view (timeline)
+	 */
+	private renderDayView(): void {
+		if (!this.calendarEl) return;
+		
+		const dayContainer = this.calendarEl.createEl('div', { cls: 'cal-day-view' });
+		const events = this.core.getDayEvents(this.currentDate, this.filteredEventsMap);
+
+		// All-day events section
+		const allDaySection = dayContainer.createEl('div', { cls: 'cal-day-view-allday' });
+		allDaySection.createEl('div', { cls: 'cal-day-view-allday-label', text: 'All Day' });
+		
+		const allDayEvents = events.filter(e => !e.time);
+		const timedEvents = events.filter(e => e.time);
+
+		if (allDayEvents.length > 0) {
+			const allDayList = allDaySection.createEl('div', { cls: 'cal-day-view-allday-list' });
+			allDayEvents.forEach(event => {
+				this.renderDayViewEvent(allDayList, event);
+			});
+		} else {
+			allDaySection.createEl('div', { cls: 'cal-day-view-empty', text: 'No all-day events' });
+		}
+
+		// Timeline section
+		const timelineSection = dayContainer.createEl('div', { cls: 'cal-day-view-timeline' });
+		
+		// Create hour slots
+		for (let hour = 0; hour < 24; hour++) {
+			const hourSlot = timelineSection.createEl('div', { cls: 'cal-day-view-hour' });
+			
+			const hourLabel = hourSlot.createEl('div', { cls: 'cal-day-view-hour-label' });
+			const displayHour = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
+			const ampm = hour < 12 ? 'AM' : 'PM';
+			hourLabel.createEl('span', { text: `${displayHour}` });
+			hourLabel.createEl('span', { cls: 'cal-day-view-ampm', text: ampm });
+			
+			const hourEvents = hourSlot.createEl('div', { cls: 'cal-day-view-hour-events' });
+			
+			// Find events that start in this hour
+			const hourEventsFiltered = timedEvents.filter(e => {
+				const time = DateUtils.parseTime(e.time || '');
+				if (time === null) return false;
+				const eventHour = Math.floor(time / 60);
+				return eventHour === hour;
+			});
+			
+			hourEventsFiltered.forEach(event => {
+				this.renderDayViewEvent(hourEvents, event);
+			});
+		}
+
+		// Scroll to current hour if today
+		if (DateUtils.isSameDay(this.currentDate, new Date())) {
+			const currentHour = new Date().getHours();
+			setTimeout(() => {
+				const hourElements = timelineSection.querySelectorAll('.cal-day-view-hour');
+				if (hourElements[currentHour]) {
+					hourElements[currentHour].scrollIntoView({ behavior: 'smooth', block: 'center' });
+				}
+			}, 100);
+		}
+	}
+
+	/**
+	 * Render an event in day view
+	 */
+	private renderDayViewEvent(container: HTMLElement, event: CalendarEvent): void {
+		const eventEl = container.createEl('div', { cls: 'cal-day-view-event' });
+		
+		// Apply custom color if set
+		if (event.color) {
+			eventEl.style.setProperty('--event-color', event.color);
+			eventEl.addClass('cal-event-colored');
+		}
+
+		// Recurring indicator
+		if (event.isRecurring) {
+			const recurringIcon = eventEl.createEl('span', { cls: 'cal-event-recurring' });
+			setIcon(recurringIcon, 'repeat');
+		}
+
+		// Time
+		if (event.time) {
+			eventEl.createEl('span', { 
+				cls: 'cal-day-view-event-time',
+				text: DateUtils.formatTime(event.time)
+			});
+		}
+
+		// Title
+		eventEl.createEl('span', { 
+			cls: 'cal-day-view-event-title',
+			text: event.title
+		});
+
+		// Click to open
+		eventEl.addEventListener('click', () => this.openFile(event.file));
+
+		// Preview on hover
+		if (this.plugin.settings.showPreviewOnHover) {
+			this.setupEventPreview(eventEl, event);
+		}
+	}
+
+	/**
 	 * Render a single day cell
 	 */
 	private renderDay(container: HTMLElement, day: CalendarDate): void {
@@ -287,7 +582,7 @@ export class CalendarView extends ItemView {
 		if (day.isToday) classes.push('cal-day-today');
 		if (day.isWeekend) classes.push('cal-day-weekend');
 		if (day.dateStr === this.selectedDate) classes.push('cal-day-selected');
-		if (day.files.length > 0) classes.push('cal-day-has-events');
+		if (day.events.length > 0) classes.push('cal-day-has-events');
 		if (this.isExpandedMode) classes.push('cal-day-inline-events');
 		
 		const dayEl = container.createEl('div', { cls: classes.join(' ') });
@@ -298,23 +593,27 @@ export class CalendarView extends ItemView {
 		dateNum.createEl('span', { text: day.date.getDate().toString() });
 
 		// Events display - depends on mode
-		if (day.files.length > 0) {
+		if (day.events.length > 0) {
 			if (this.isExpandedMode) {
 				// Expanded mode: show event titles inline
 				this.renderInlineEvents(dayEl, day);
 			} else {
-				// Compact mode: show dots
+				// Compact mode: show dots with colors
 				const indicators = dayEl.createEl('div', { cls: 'cal-day-indicators' });
-				const count = Math.min(day.files.length, 3);
+				const count = Math.min(day.events.length, 3);
 				
 				for (let i = 0; i < count; i++) {
-					indicators.createEl('span', { cls: 'cal-indicator' });
+					const indicator = indicators.createEl('span', { cls: 'cal-indicator' });
+					const eventColor = day.events[i].color;
+					if (eventColor) {
+						indicator.style.backgroundColor = eventColor;
+					}
 				}
 				
-				if (day.files.length > 3) {
+				if (day.events.length > 3) {
 					indicators.createEl('span', { 
 						cls: 'cal-indicator-more',
-						text: `+${day.files.length - 3}`
+						text: `+${day.events.length - 3}`
 					});
 				}
 			}
@@ -327,6 +626,13 @@ export class CalendarView extends ItemView {
 			e.stopPropagation();
 			this.selectDate(day.dateStr);
 		});
+
+		// Double-click to open day view
+		dayEl.addEventListener('dblclick', (e) => {
+			e.stopPropagation();
+			this.currentDate = day.date;
+			this.setViewMode('day');
+		});
 	}
 
 	/**
@@ -335,26 +641,50 @@ export class CalendarView extends ItemView {
 	private renderInlineEvents(dayEl: HTMLElement, day: CalendarDate): void {
 		const eventsContainer = dayEl.createEl('div', { cls: 'cal-inline-events' });
 		
-		// Calculate how many events we can show based on available space
-		// We'll show 2-3 events max in inline mode
 		const maxVisible = 3;
-		const visibleFiles = day.files.slice(0, maxVisible);
-		const remaining = day.files.length - maxVisible;
+		const visibleEvents = day.events.slice(0, maxVisible);
+		const remaining = day.events.length - maxVisible;
 		
-		visibleFiles.forEach(file => {
+		visibleEvents.forEach(event => {
 			const eventEl = eventsContainer.createEl('div', { 
 				cls: 'cal-inline-event',
-				attr: { 'title': file.basename }
+				attr: { 'title': event.title }
 			});
+			
+			// Apply custom color if set
+			if (event.color) {
+				eventEl.style.setProperty('--event-color', event.color);
+				eventEl.addClass('cal-event-colored');
+			}
+
+			// Recurring indicator
+			if (event.isRecurring) {
+				const recurringIcon = eventEl.createEl('span', { cls: 'cal-event-recurring-inline' });
+				setIcon(recurringIcon, 'repeat');
+			}
+
+			// Time prefix if available
+			if (event.time) {
+				eventEl.createEl('span', { 
+					cls: 'cal-inline-event-time',
+					text: DateUtils.formatTime(event.time)
+				});
+			}
+
 			eventEl.createEl('span', { 
 				cls: 'cal-inline-event-text',
-				text: file.basename 
+				text: event.title 
 			});
 			
 			eventEl.addEventListener('click', (e) => {
 				e.stopPropagation();
-				this.openFile(file);
+				this.openFile(event.file);
 			});
+
+			// Preview on hover
+			if (this.plugin.settings.showPreviewOnHover) {
+				this.setupEventPreview(eventEl, event);
+			}
 		});
 		
 		if (remaining > 0) {
@@ -363,6 +693,61 @@ export class CalendarView extends ItemView {
 				text: `+${remaining} more`
 			});
 		}
+	}
+
+	/**
+	 * Setup preview tooltip for an event
+	 */
+	private setupEventPreview(eventEl: HTMLElement, event: CalendarEvent): void {
+		let previewTimeout: ReturnType<typeof setTimeout>;
+
+		eventEl.addEventListener('mouseenter', async () => {
+			previewTimeout = setTimeout(async () => {
+				if (!this.previewTooltip) return;
+
+				const preview = await this.core.getFilePreview(
+					event.file, 
+					this.plugin.settings.previewLength
+				);
+
+				if (!preview) {
+					this.previewTooltip.style.display = 'none';
+					return;
+				}
+
+				this.previewTooltip.empty();
+				this.previewTooltip.createEl('div', { 
+					cls: 'cal-preview-title',
+					text: event.title
+				});
+				this.previewTooltip.createEl('div', { 
+					cls: 'cal-preview-content',
+					text: preview
+				});
+
+				// Position tooltip
+				const rect = eventEl.getBoundingClientRect();
+				this.previewTooltip.style.left = `${rect.left}px`;
+				this.previewTooltip.style.top = `${rect.bottom + 8}px`;
+				this.previewTooltip.style.display = 'block';
+
+				// Adjust if off-screen
+				const tooltipRect = this.previewTooltip.getBoundingClientRect();
+				if (tooltipRect.right > window.innerWidth) {
+					this.previewTooltip.style.left = `${window.innerWidth - tooltipRect.width - 16}px`;
+				}
+				if (tooltipRect.bottom > window.innerHeight) {
+					this.previewTooltip.style.top = `${rect.top - tooltipRect.height - 8}px`;
+				}
+			}, 500);
+		});
+
+		eventEl.addEventListener('mouseleave', () => {
+			clearTimeout(previewTimeout);
+			if (this.previewTooltip) {
+				this.previewTooltip.style.display = 'none';
+			}
+		});
 	}
 
 	/**
@@ -383,7 +768,7 @@ export class CalendarView extends ItemView {
 		const header = dayEl.createEl('div', { cls: 'cal-day-header' });
 		header.createEl('span', { 
 			cls: 'cal-day-name',
-			text: day.date.toLocaleDateString('en-US', { weekday: 'short' })
+			text: day.date.toLocaleDateString(DateUtils.getLocale(), { weekday: 'short' })
 		});
 		header.createEl('span', { 
 			cls: 'cal-day-num',
@@ -391,23 +776,29 @@ export class CalendarView extends ItemView {
 		});
 
 		// Events list
-		if (day.files.length > 0) {
+		if (day.events.length > 0) {
 			const eventsList = dayEl.createEl('div', { cls: 'cal-day-events' });
-			day.files.slice(0, 4).forEach(file => {
-				const eventEl = eventsList.createEl('div', { 
-					cls: 'cal-event-mini',
-					text: file.basename
-				});
+			day.events.slice(0, 4).forEach(event => {
+				const eventEl = eventsList.createEl('div', { cls: 'cal-event-mini' });
+				
+				// Apply custom color
+				if (event.color) {
+					eventEl.style.setProperty('--event-color', event.color);
+					eventEl.addClass('cal-event-colored');
+				}
+
+				eventEl.createEl('span', { text: event.title });
+				
 				eventEl.addEventListener('click', (e) => {
 					e.stopPropagation();
-					this.openFile(file);
+					this.openFile(event.file);
 				});
 			});
 			
-			if (day.files.length > 4) {
+			if (day.events.length > 4) {
 				eventsList.createEl('div', { 
 					cls: 'cal-event-more',
-					text: `+${day.files.length - 4} more`
+					text: `+${day.events.length - 4} more`
 				});
 			}
 		}
@@ -424,6 +815,13 @@ export class CalendarView extends ItemView {
 	 */
 	private renderFileList(): void {
 		if (!this.fileListEl || !this.resizerEl) return;
+
+		// In day view, don't show file list (events are shown in timeline)
+		if (this.viewMode === 'day') {
+			this.fileListEl.style.display = 'none';
+			this.resizerEl.style.display = 'none';
+			return;
+		}
 
 		if (!this.selectedDate) {
 			this.fileListEl.style.display = 'none';
@@ -444,9 +842,9 @@ export class CalendarView extends ItemView {
 		}
 
 		// File list - compact style like inline events
-		const files = this.filesMap.get(this.selectedDate) || [];
+		const events = this.filteredEventsMap.get(this.selectedDate) || [];
 		
-		if (files.length === 0) {
+		if (events.length === 0) {
 			const emptyState = this.fileListEl.createEl('div', { cls: 'cal-files-empty-compact' });
 			emptyState.createEl('span', { 
 				text: 'No notes',
@@ -455,16 +853,43 @@ export class CalendarView extends ItemView {
 		} else {
 			const list = this.fileListEl.createEl('div', { cls: 'cal-files-list-compact' });
 			
-			files.forEach(file => {
+			events.forEach(event => {
 				const item = list.createEl('div', { 
 					cls: 'cal-file-item-compact',
-					attr: { 'title': file.path }
+					attr: { 'title': event.file.path }
 				});
+
+				// Apply custom color
+				if (event.color) {
+					item.style.setProperty('--event-color', event.color);
+					item.addClass('cal-event-colored');
+				}
+
+				// Recurring indicator
+				if (event.isRecurring) {
+					const recurringIcon = item.createEl('span', { cls: 'cal-event-recurring-inline' });
+					setIcon(recurringIcon, 'repeat');
+				}
+
+				// Time
+				if (event.time) {
+					item.createEl('span', { 
+						cls: 'cal-file-item-time',
+						text: DateUtils.formatTime(event.time)
+					});
+				}
+
 				item.createEl('span', { 
 					cls: 'cal-file-item-text',
-					text: file.basename 
+					text: event.title 
 				});
-				item.addEventListener('click', () => this.openFile(file));
+				
+				item.addEventListener('click', () => this.openFile(event.file));
+
+				// Preview on hover
+				if (this.plugin.settings.showPreviewOnHover) {
+					this.setupEventPreview(item, event);
+				}
 			});
 		}
 	}
@@ -479,19 +904,31 @@ export class CalendarView extends ItemView {
 	}
 
 	private navigatePrevious(): void {
-		if (this.viewMode === 'month') {
-			this.currentDate = DateUtils.addMonths(this.currentDate, -1);
-		} else {
-			this.currentDate = DateUtils.addDays(this.currentDate, -7);
+		switch (this.viewMode) {
+			case 'month':
+				this.currentDate = DateUtils.addMonths(this.currentDate, -1);
+				break;
+			case 'week':
+				this.currentDate = DateUtils.addDays(this.currentDate, -7);
+				break;
+			case 'day':
+				this.currentDate = DateUtils.addDays(this.currentDate, -1);
+				break;
 		}
 		this.render();
 	}
 
 	private navigateNext(): void {
-		if (this.viewMode === 'month') {
-			this.currentDate = DateUtils.addMonths(this.currentDate, 1);
-		} else {
-			this.currentDate = DateUtils.addDays(this.currentDate, 7);
+		switch (this.viewMode) {
+			case 'month':
+				this.currentDate = DateUtils.addMonths(this.currentDate, 1);
+				break;
+			case 'week':
+				this.currentDate = DateUtils.addDays(this.currentDate, 7);
+				break;
+			case 'day':
+				this.currentDate = DateUtils.addDays(this.currentDate, 1);
+				break;
 		}
 		this.render();
 	}
@@ -530,6 +967,10 @@ export class CalendarView extends ItemView {
 		} else {
 			this.selectedDate = dateStr;
 		}
+		eventBus.emit('dateSelected', { 
+			dateStr, 
+			date: DateUtils.fromDateString(dateStr) 
+		});
 		this.render();
 	}
 
@@ -538,13 +979,18 @@ export class CalendarView extends ItemView {
 	 */
 	private openFile(file: TFile): void {
 		this.app.workspace.openLinkText(file.path, '', false);
+		eventBus.emit('noteOpened', { file });
 	}
 
 	/**
 	 * Create a new note for the selected date
 	 */
 	private async createNote(): Promise<void> {
-		if (!this.selectedDate) return;
+		const targetDate = this.viewMode === 'day' 
+			? DateUtils.toDateString(this.currentDate)
+			: this.selectedDate;
+
+		if (!targetDate) return;
 
 		const settings = this.plugin.settings;
 		
@@ -555,8 +1001,8 @@ export class CalendarView extends ItemView {
 		const folder = settings.noteFolder.trim();
 		const fullPath = folder ? `${folder}/${fileName}` : fileName;
 		
-		// Generate content (only frontmatter)
-		const content = this.generateNoteContent(this.selectedDate);
+		// Generate content from template
+		const content = this.generateNoteContent(targetDate);
 		
 		try {
 			// Ensure folder exists
@@ -567,17 +1013,16 @@ export class CalendarView extends ItemView {
 			// Create file
 			const newFile = await this.app.vault.create(fullPath, content);
 			
+			// Emit event
+			eventBus.emit('noteCreated', { file: newFile });
+			
 			// Open file
 			const leaf = await this.app.workspace.getLeaf(false);
 			await leaf.openFile(newFile);
 			
 			// Trigger rename to focus on title
 			setTimeout(() => {
-				const fileExplorer = this.app.workspace.getLeavesOfType('file-explorer')[0];
-				if (fileExplorer) {
-					// Use the app's built-in file rename command
-					(this.app as any).commands.executeCommandById('workspace:edit-file-title');
-				}
+				(this.app as any).commands.executeCommandById('workspace:edit-file-title');
 			}, 100);
 			
 			// Refresh after a short delay
@@ -592,18 +1037,34 @@ export class CalendarView extends ItemView {
 	 */
 	private generateNoteContent(dateStr: string): string {
 		const settings = this.plugin.settings;
+		const date = DateUtils.fromDateString(dateStr);
+		const formattedDate = DateUtils.formatDate(date, settings.dateFormat);
 		
-		// Frontmatter only
+		// Parse tags
+		const tags = settings.tagFilter.split(/[,\s]+/).filter(t => t.length > 0);
+		const tagYaml = tags.length > 0 
+			? tags.map(t => `  - ${t}`).join('\n')
+			: `  - calendar`;
+		
+		// Frontmatter
 		const frontmatter = [
 			'---',
 			`${settings.dateProperty}: ${dateStr}`,
 			'tags:',
-			`  - ${settings.tagFilter}`,
+			tagYaml,
 			'---',
 			''
 		].join('\n');
 		
-		return frontmatter;
+		// Apply template if not empty
+		let body = '';
+		if (settings.noteTemplate) {
+			body = settings.noteTemplate
+				.replace(/\{\{title\}\}/g, 'Untitled')
+				.replace(/\{\{date\}\}/g, formattedDate);
+		}
+		
+		return frontmatter + body;
 	}
 
 	/**
@@ -622,16 +1083,7 @@ export class CalendarView extends ItemView {
 	private setupResizer(): void {
 		if (!this.resizerEl) return;
 
-		const onMouseDown = (e: MouseEvent) => {
-			e.preventDefault();
-			this.isResizing = true;
-			this.viewContainerEl.addClass('cal-resizing');
-			
-			document.addEventListener('mousemove', onMouseMove);
-			document.addEventListener('mouseup', onMouseUp);
-		};
-
-		const onMouseMove = (e: MouseEvent) => {
+		this.documentMouseMoveHandler = (e: MouseEvent) => {
 			if (!this.isResizing || !this.fileListEl || !this.viewContainerEl) return;
 			
 			const containerRect = this.viewContainerEl.getBoundingClientRect();
@@ -647,30 +1099,25 @@ export class CalendarView extends ItemView {
 			this.fileListEl.style.maxHeight = 'none';
 		};
 
-		const onMouseUp = () => {
+		this.documentMouseUpHandler = () => {
 			this.isResizing = false;
 			this.viewContainerEl.removeClass('cal-resizing');
-			
-			document.removeEventListener('mousemove', onMouseMove);
-			document.removeEventListener('mouseup', onMouseUp);
-			
-			// Save position
 			this.saveDividerPosition();
+		};
+
+		const onMouseDown = (e: MouseEvent) => {
+			e.preventDefault();
+			this.isResizing = true;
+			this.viewContainerEl.addClass('cal-resizing');
+			
+			document.addEventListener('mousemove', this.documentMouseMoveHandler!);
+			document.addEventListener('mouseup', this.documentMouseUpHandler!);
 		};
 
 		this.resizerEl.addEventListener('mousedown', onMouseDown);
 
 		// Touch support for mobile
-		const onTouchStart = (e: TouchEvent) => {
-			e.preventDefault();
-			this.isResizing = true;
-			this.viewContainerEl.addClass('cal-resizing');
-			
-			document.addEventListener('touchmove', onTouchMove, { passive: false });
-			document.addEventListener('touchend', onTouchEnd);
-		};
-
-		const onTouchMove = (e: TouchEvent) => {
+		this.documentTouchMoveHandler = (e: TouchEvent) => {
 			if (!this.isResizing || !this.fileListEl || !this.viewContainerEl) return;
 			e.preventDefault();
 			
@@ -687,14 +1134,19 @@ export class CalendarView extends ItemView {
 			this.fileListEl.style.maxHeight = 'none';
 		};
 
-		const onTouchEnd = () => {
+		this.documentTouchEndHandler = () => {
 			this.isResizing = false;
 			this.viewContainerEl.removeClass('cal-resizing');
-			
-			document.removeEventListener('touchmove', onTouchMove);
-			document.removeEventListener('touchend', onTouchEnd);
-			
 			this.saveDividerPosition();
+		};
+
+		const onTouchStart = (e: TouchEvent) => {
+			e.preventDefault();
+			this.isResizing = true;
+			this.viewContainerEl.addClass('cal-resizing');
+			
+			document.addEventListener('touchmove', this.documentTouchMoveHandler!, { passive: false });
+			document.addEventListener('touchend', this.documentTouchEndHandler!);
 		};
 
 		this.resizerEl.addEventListener('touchstart', onTouchStart, { passive: false });
@@ -704,8 +1156,12 @@ export class CalendarView extends ItemView {
 	 * Save the divider position to localStorage
 	 */
 	private saveDividerPosition(): void {
-		if (this.fileListHeight !== null) {
-			localStorage.setItem(DIVIDER_POSITION_KEY, this.fileListHeight.toString());
+		try {
+			if (this.fileListHeight !== null) {
+				localStorage.setItem(DIVIDER_POSITION_KEY, this.fileListHeight.toString());
+			}
+		} catch (error) {
+			console.error('Failed to save divider position:', error);
 		}
 	}
 
@@ -713,9 +1169,13 @@ export class CalendarView extends ItemView {
 	 * Load the divider position from localStorage
 	 */
 	private loadDividerPosition(): void {
-		const saved = localStorage.getItem(DIVIDER_POSITION_KEY);
-		if (saved) {
-			this.fileListHeight = parseInt(saved, 10);
+		try {
+			const saved = localStorage.getItem(DIVIDER_POSITION_KEY);
+			if (saved) {
+				this.fileListHeight = parseInt(saved, 10);
+			}
+		} catch (error) {
+			console.error('Failed to load divider position:', error);
 		}
 	}
 

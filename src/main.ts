@@ -1,7 +1,8 @@
-import { App, Plugin, PluginSettingTab, Setting, WorkspaceLeaf } from 'obsidian';
+import { App, Plugin, PluginSettingTab, Setting, WorkspaceLeaf, Notice } from 'obsidian';
 import { CalendarView, VIEW_TYPE_CALENDAR } from './calendar-view';
-import { CalendarPluginSettings, DEFAULT_SETTINGS, WeekStartDay, CalendarViewMode } from './types';
-import { debounce } from './utils';
+import { CalendarPluginSettings, DEFAULT_SETTINGS, WeekStartDay, CalendarViewMode, AVAILABLE_LOCALES, EVENT_COLORS, TagFilterMode } from './types';
+import { debounce, SettingsValidator, DateUtils } from './utils';
+import { eventBus } from './event-bus';
 
 export default class CalendarPlugin extends Plugin {
 	settings!: CalendarPluginSettings;
@@ -14,6 +15,9 @@ export default class CalendarPlugin extends Plugin {
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
+
+		// Set locale
+		DateUtils.setLocale(this.settings.locale);
 
 		// Register the calendar view
 		this.registerView(
@@ -38,7 +42,37 @@ export default class CalendarPlugin extends Plugin {
 			name: 'Go to today',
 			callback: () => {
 				this.activateView();
-				// Could emit event to view here
+				eventBus.emit('dateSelected', {
+					dateStr: DateUtils.toDateString(new Date()),
+					date: new Date()
+				});
+			}
+		});
+
+		this.addCommand({
+			id: 'switch-to-month-view',
+			name: 'Switch to month view',
+			callback: () => {
+				this.activateView();
+				eventBus.emit('viewModeChanged', { mode: 'month' });
+			}
+		});
+
+		this.addCommand({
+			id: 'switch-to-week-view',
+			name: 'Switch to week view',
+			callback: () => {
+				this.activateView();
+				eventBus.emit('viewModeChanged', { mode: 'week' });
+			}
+		});
+
+		this.addCommand({
+			id: 'switch-to-day-view',
+			name: 'Switch to day view',
+			callback: () => {
+				this.activateView();
+				eventBus.emit('viewModeChanged', { mode: 'day' });
 			}
 		});
 
@@ -65,6 +99,7 @@ export default class CalendarPlugin extends Plugin {
 
 	onunload(): void {
 		this.app.workspace.detachLeavesOfType(VIEW_TYPE_CALENDAR);
+		eventBus.clear();
 	}
 
 	async loadSettings(): Promise<void> {
@@ -72,7 +107,14 @@ export default class CalendarPlugin extends Plugin {
 	}
 
 	async saveSettings(): Promise<void> {
+		// Validate settings before saving
+		const errors = SettingsValidator.validateSettings(this.settings);
+		if (errors.length > 0) {
+			new Notice('Settings validation errors:\n' + errors.join('\n'));
+		}
+
 		await this.saveData(this.settings);
+		eventBus.emit('settingsChanged', undefined);
 		this.refreshCalendarView();
 	}
 
@@ -129,12 +171,24 @@ class CalendarSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('Tag filter')
-			.setDesc('Only show notes with this tag (without #)')
+			.setDesc('Filter notes by tags. Use comma or space to separate multiple tags.')
 			.addText(text => text
-				.setPlaceholder('calendar')
+				.setPlaceholder('calendar, event')
 				.setValue(this.plugin.settings.tagFilter)
 				.onChange(async (value) => {
 					this.plugin.settings.tagFilter = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Tag filter mode')
+			.setDesc('How to match multiple tags')
+			.addDropdown(dropdown => dropdown
+				.addOption('any', 'Any tag (OR)')
+				.addOption('all', 'All tags (AND)')
+				.setValue(this.plugin.settings.tagFilterMode)
+				.onChange(async (value) => {
+					this.plugin.settings.tagFilterMode = value as TagFilterMode;
 					await this.plugin.saveSettings();
 				}));
 
@@ -146,6 +200,65 @@ class CalendarSettingTab extends PluginSettingTab {
 				.setValue(this.plugin.settings.dateProperty)
 				.onChange(async (value) => {
 					this.plugin.settings.dateProperty = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('End date property')
+			.setDesc('Frontmatter property for multi-day events (optional)')
+			.addText(text => text
+				.setPlaceholder('endDate')
+				.setValue(this.plugin.settings.endDateProperty)
+				.onChange(async (value) => {
+					this.plugin.settings.endDateProperty = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Time property')
+			.setDesc('Frontmatter property for event time (optional)')
+			.addText(text => text
+				.setPlaceholder('time')
+				.setValue(this.plugin.settings.timeProperty)
+				.onChange(async (value) => {
+					this.plugin.settings.timeProperty = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Color property')
+			.setDesc('Frontmatter property for event color (optional). Use color names or hex values.')
+			.addText(text => text
+				.setPlaceholder('color')
+				.setValue(this.plugin.settings.colorProperty)
+				.onChange(async (value) => {
+					this.plugin.settings.colorProperty = value;
+					await this.plugin.saveSettings();
+				}));
+
+		// Show available color names
+		const colorHint = containerEl.createEl('div', { cls: 'setting-item-description' });
+		colorHint.style.marginTop = '-10px';
+		colorHint.style.marginBottom = '10px';
+		colorHint.style.fontSize = '11px';
+		colorHint.createEl('span', { text: 'Available colors: ' });
+		Object.keys(EVENT_COLORS).forEach((color, i) => {
+			const colorSpan = colorHint.createEl('span', { text: color });
+			colorSpan.style.color = EVENT_COLORS[color];
+			colorSpan.style.fontWeight = 'bold';
+			if (i < Object.keys(EVENT_COLORS).length - 1) {
+				colorHint.createEl('span', { text: ', ' });
+			}
+		});
+
+		new Setting(containerEl)
+			.setName('Recurrence property')
+			.setDesc('Frontmatter property for recurring events (daily, weekly, monthly, yearly)')
+			.addText(text => text
+				.setPlaceholder('recurrence')
+				.setValue(this.plugin.settings.recurrenceProperty)
+				.onChange(async (value) => {
+					this.plugin.settings.recurrenceProperty = value;
 					await this.plugin.saveSettings();
 				}));
 
@@ -193,6 +306,20 @@ class CalendarSettingTab extends PluginSettingTab {
 		containerEl.createEl('h3', { text: 'Display Settings' });
 
 		new Setting(containerEl)
+			.setName('Locale')
+			.setDesc('Language for month and day names')
+			.addDropdown(dropdown => {
+				Object.entries(AVAILABLE_LOCALES).forEach(([code, name]) => {
+					dropdown.addOption(code, name);
+				});
+				dropdown.setValue(this.plugin.settings.locale)
+					.onChange(async (value) => {
+						this.plugin.settings.locale = value;
+						await this.plugin.saveSettings();
+					});
+			});
+
+		new Setting(containerEl)
 			.setName('Week starts on')
 			.setDesc('First day of the week')
 			.addDropdown(dropdown => dropdown
@@ -206,7 +333,7 @@ class CalendarSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('Show week numbers')
-			.setDesc('Display ISO week numbers in the calendar')
+			.setDesc('Display week numbers in the calendar')
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.showWeekNumbers)
 				.onChange(async (value) => {
@@ -220,9 +347,32 @@ class CalendarSettingTab extends PluginSettingTab {
 			.addDropdown(dropdown => dropdown
 				.addOption('month', 'Month')
 				.addOption('week', 'Week')
+				.addOption('day', 'Day')
 				.setValue(this.plugin.settings.defaultView)
 				.onChange(async (value) => {
 					this.plugin.settings.defaultView = value as CalendarViewMode;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Show preview on hover')
+			.setDesc('Show note preview tooltip when hovering over events')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.showPreviewOnHover)
+				.onChange(async (value) => {
+					this.plugin.settings.showPreviewOnHover = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Preview length')
+			.setDesc('Maximum characters to show in preview tooltip')
+			.addSlider(slider => slider
+				.setLimits(50, 500, 25)
+				.setValue(this.plugin.settings.previewLength)
+				.setDynamicTooltip()
+				.onChange(async (value) => {
+					this.plugin.settings.previewLength = value;
 					await this.plugin.saveSettings();
 				}));
 
@@ -236,6 +386,10 @@ class CalendarSettingTab extends PluginSettingTab {
 				.setPlaceholder('#7c3aed')
 				.setValue(this.plugin.settings.accentColor)
 				.onChange(async (value) => {
+					if (value && !SettingsValidator.isValidHexColor(value)) {
+						new Notice('Invalid hex color format. Use format like #7c3aed');
+						return;
+					}
 					this.plugin.settings.accentColor = value;
 					await this.plugin.saveSettings();
 				}));

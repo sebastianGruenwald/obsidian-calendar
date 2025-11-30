@@ -1,9 +1,27 @@
-import { CalendarPluginSettings, WeekStartDay } from './types';
+import { WeekStartDay, CalendarPluginSettings, EVENT_COLORS, AVAILABLE_LOCALES } from './types';
 
 /**
  * Date formatting utilities
  */
 export class DateUtils {
+	private static locale: string = 'en-US';
+
+	/**
+	 * Set the locale for date formatting
+	 */
+	static setLocale(locale: string): void {
+		if (AVAILABLE_LOCALES[locale]) {
+			DateUtils.locale = locale;
+		}
+	}
+
+	/**
+	 * Get current locale
+	 */
+	static getLocale(): string {
+		return DateUtils.locale;
+	}
+
 	/**
 	 * Format a date to YYYY-MM-DD string
 	 */
@@ -28,10 +46,10 @@ export class DateUtils {
 		const year = date.getFullYear();
 		const month = String(date.getMonth() + 1).padStart(2, '0');
 		const day = String(date.getDate()).padStart(2, '0');
-		const monthName = date.toLocaleDateString('en-US', { month: 'long' });
-		const shortMonthName = date.toLocaleDateString('en-US', { month: 'short' });
-		const dayName = date.toLocaleDateString('en-US', { weekday: 'long' });
-		const shortDayName = date.toLocaleDateString('en-US', { weekday: 'short' });
+		const monthName = date.toLocaleDateString(DateUtils.locale, { month: 'long' });
+		const shortMonthName = date.toLocaleDateString(DateUtils.locale, { month: 'short' });
+		const dayName = date.toLocaleDateString(DateUtils.locale, { weekday: 'long' });
+		const shortDayName = date.toLocaleDateString(DateUtils.locale, { weekday: 'short' });
 
 		return format
 			.replace(/YYYY/g, year.toString())
@@ -47,14 +65,24 @@ export class DateUtils {
 	}
 
 	/**
-	 * Get the week number for a date (ISO week)
+	 * Get the week number for a date (ISO week or Sunday-based)
 	 */
-	static getWeekNumber(date: Date): number {
-		const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-		const dayNum = d.getUTCDay() || 7;
-		d.setUTCDate(d.getUTCDate() + 4 - dayNum);
-		const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-		return Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+	static getWeekNumber(date: Date, weekStartsOn: WeekStartDay = 1): number {
+		if (weekStartsOn === 1) {
+			// ISO week (Monday start)
+			const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+			const dayNum = d.getUTCDay() || 7;
+			d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+			const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+			return Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+		} else {
+			// Sunday-based week
+			const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+			const startOfYear = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+			const dayOfYear = Math.floor((d.getTime() - startOfYear.getTime()) / 86400000);
+			const firstDayOfYear = startOfYear.getUTCDay();
+			return Math.ceil((dayOfYear + firstDayOfYear + 1) / 7);
+		}
 	}
 
 	/**
@@ -116,7 +144,7 @@ export class DateUtils {
 	 * Get month name
 	 */
 	static getMonthName(date: Date, style: 'long' | 'short' = 'long'): string {
-		return date.toLocaleDateString('en-US', { month: style });
+		return date.toLocaleDateString(DateUtils.locale, { month: style });
 	}
 
 	/**
@@ -130,7 +158,7 @@ export class DateUtils {
 			const dayIndex = (weekStartsOn + i) % 7;
 			const date = new Date(baseDate);
 			date.setDate(date.getDate() + dayIndex);
-			days.push(date.toLocaleDateString('en-US', { weekday: style }));
+			days.push(date.toLocaleDateString(DateUtils.locale, { weekday: style }));
 		}
 		
 		return days;
@@ -141,7 +169,7 @@ export class DateUtils {
 	 */
 	static formatSelectedDate(dateStr: string): string {
 		const date = DateUtils.fromDateString(dateStr);
-		return date.toLocaleDateString('en-US', { 
+		return date.toLocaleDateString(DateUtils.locale, { 
 			weekday: 'long', 
 			month: 'short', 
 			day: 'numeric' 
@@ -164,6 +192,73 @@ export class DateUtils {
 		}
 		
 		return `${startMonth} ${start.getDate()} - ${end.getDate()}, ${start.getFullYear()}`;
+	}
+
+	/**
+	 * Parse time string to minutes since midnight
+	 */
+	static parseTime(timeStr: string): number | null {
+		if (!timeStr) return null;
+		
+		// Handle various formats: "14:30", "2:30 PM", "14:30:00"
+		const match = timeStr.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?$/i);
+		if (!match) return null;
+		
+		let hours = parseInt(match[1], 10);
+		const minutes = parseInt(match[2], 10);
+		const ampm = match[4]?.toUpperCase();
+		
+		if (ampm === 'PM' && hours !== 12) hours += 12;
+		if (ampm === 'AM' && hours === 12) hours = 0;
+		
+		if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
+		
+		return hours * 60 + minutes;
+	}
+
+	/**
+	 * Format time for display
+	 */
+	static formatTime(timeStr: string): string {
+		const minutes = DateUtils.parseTime(timeStr);
+		if (minutes === null) return timeStr;
+		
+		const hours = Math.floor(minutes / 60);
+		const mins = minutes % 60;
+		
+		// Use locale-aware time formatting
+		const date = new Date();
+		date.setHours(hours, mins, 0, 0);
+		
+		return date.toLocaleTimeString(DateUtils.locale, {
+			hour: 'numeric',
+			minute: '2-digit',
+		});
+	}
+
+	/**
+	 * Check if a date falls within a range
+	 */
+	static isDateInRange(date: Date, start: Date, end: Date): boolean {
+		const d = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+		const s = new Date(start.getFullYear(), start.getMonth(), start.getDate()).getTime();
+		const e = new Date(end.getFullYear(), end.getMonth(), end.getDate()).getTime();
+		return d >= s && d <= e;
+	}
+
+	/**
+	 * Get all dates between two dates (inclusive)
+	 */
+	static getDatesBetween(start: Date, end: Date): Date[] {
+		const dates: Date[] = [];
+		const current = new Date(start);
+		
+		while (current <= end) {
+			dates.push(new Date(current));
+			current.setDate(current.getDate() + 1);
+		}
+		
+		return dates;
 	}
 }
 
@@ -226,7 +321,11 @@ export class DOMUtils {
 			'plus': '<line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line>',
 			'calendar': '<rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line>',
 			'file-text': '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline>',
-			'external-link': '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line>'
+			'external-link': '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line>',
+			'search': '<circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line>',
+			'x': '<line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>',
+			'repeat': '<polyline points="17 1 21 5 17 9"></polyline><path d="M3 11V9a4 4 0 0 1 4-4h14"></path><polyline points="7 23 3 19 7 15"></polyline><path d="M21 13v2a4 4 0 0 1-4 4H3"></path>',
+			'clock': '<circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline>',
 		};
 
 		const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -243,6 +342,88 @@ export class DOMUtils {
 		svg.innerHTML = icons[name] || '';
 		
 		return svg;
+	}
+}
+
+/**
+ * Settings validation utilities
+ */
+export class SettingsValidator {
+	/**
+	 * Validate hex color
+	 */
+	static isValidHexColor(color: string): boolean {
+		if (!color) return true; // Empty is valid (use default)
+		return /^#([0-9A-Fa-f]{3}){1,2}$/.test(color);
+	}
+
+	/**
+	 * Validate date format string
+	 */
+	static isValidDateFormat(format: string): boolean {
+		if (!format) return false;
+		// Must contain at least year, month, and day tokens
+		const hasYear = /YYYY|YY/.test(format);
+		const hasMonth = /MMMM|MMM|MM|M/.test(format);
+		const hasDay = /DD|D/.test(format);
+		return hasYear && hasMonth && hasDay;
+	}
+
+	/**
+	 * Validate folder path
+	 */
+	static isValidFolderPath(path: string): boolean {
+		if (!path) return true; // Empty is valid (vault root)
+		// Check for invalid characters
+		return !/[<>:"|?*]/.test(path);
+	}
+
+	/**
+	 * Validate locale
+	 */
+	static isValidLocale(locale: string): boolean {
+		return locale in AVAILABLE_LOCALES;
+	}
+
+	/**
+	 * Validate and sanitize settings
+	 */
+	static validateSettings(settings: Partial<CalendarPluginSettings>): string[] {
+		const errors: string[] = [];
+
+		if (settings.accentColor && !SettingsValidator.isValidHexColor(settings.accentColor)) {
+			errors.push('Invalid accent color format. Use hex format like #7c3aed');
+		}
+
+		if (settings.dateFormat && !SettingsValidator.isValidDateFormat(settings.dateFormat)) {
+			errors.push('Invalid date format. Must include year, month, and day tokens');
+		}
+
+		if (settings.noteFolder && !SettingsValidator.isValidFolderPath(settings.noteFolder)) {
+			errors.push('Invalid folder path. Contains invalid characters');
+		}
+
+		if (settings.locale && !SettingsValidator.isValidLocale(settings.locale)) {
+			errors.push('Invalid locale selected');
+		}
+
+		return errors;
+	}
+
+	/**
+	 * Resolve color value (name or hex)
+	 */
+	static resolveColor(color: string): string {
+		if (!color) return '';
+		// Check if it's a named color
+		if (EVENT_COLORS[color.toLowerCase()]) {
+			return EVENT_COLORS[color.toLowerCase()];
+		}
+		// Check if it's a valid hex
+		if (SettingsValidator.isValidHexColor(color)) {
+			return color;
+		}
+		return '';
 	}
 }
 
@@ -273,4 +454,33 @@ export function sanitizeFilename(name: string): string {
  */
 export function generateId(): string {
 	return Math.random().toString(36).substring(2, 9);
+}
+
+/**
+ * Truncate text with ellipsis
+ */
+export function truncateText(text: string, maxLength: number): string {
+	if (text.length <= maxLength) return text;
+	return text.substring(0, maxLength - 3) + '...';
+}
+
+/**
+ * Extract preview text from markdown content
+ */
+export function extractPreview(content: string, maxLength: number): string {
+	// Remove frontmatter
+	const withoutFrontmatter = content.replace(/^---[\s\S]*?---\n?/, '');
+	
+	// Remove headers
+	const withoutHeaders = withoutFrontmatter.replace(/^#+\s+.*$/gm, '');
+	
+	// Remove markdown formatting
+	const plainText = withoutHeaders
+		.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // Links
+		.replace(/!\[([^\]]*)\]\([^)]+\)/g, '') // Images
+		.replace(/[*_`~]/g, '') // Emphasis
+		.replace(/\n+/g, ' ') // Newlines
+		.trim();
+	
+	return truncateText(plainText, maxLength);
 }
