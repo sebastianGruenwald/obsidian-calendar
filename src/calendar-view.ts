@@ -1,4 +1,4 @@
-import { ItemView, WorkspaceLeaf, TFile, setIcon } from 'obsidian';
+import { ItemView, WorkspaceLeaf, TFile, setIcon, Menu, Modal } from 'obsidian';
 import { CalendarCore } from './calendar-core';
 import { CalendarDate, CalendarViewMode, CalendarPluginSettings, CalendarEvent } from './types';
 import { DateUtils, debounce } from './utils';
@@ -566,6 +566,12 @@ export class CalendarView extends ItemView {
 		// Click to open
 		eventEl.addEventListener('click', () => this.openFile(event.file));
 
+		// Right-click context menu for events
+		eventEl.addEventListener('contextmenu', (e) => {
+			e.preventDefault();
+			this.showEventContextMenu(e, event);
+		});
+
 		// Preview on hover
 		if (this.plugin.settings.showPreviewOnHover) {
 			this.setupEventPreview(eventEl, event);
@@ -633,6 +639,12 @@ export class CalendarView extends ItemView {
 			this.currentDate = day.date;
 			this.setViewMode('day');
 		});
+
+		// Right-click context menu
+		dayEl.addEventListener('contextmenu', (e) => {
+			e.preventDefault();
+			this.showDayContextMenu(e, day.dateStr);
+		});
 	}
 
 	/**
@@ -679,6 +691,13 @@ export class CalendarView extends ItemView {
 			eventEl.addEventListener('click', (e) => {
 				e.stopPropagation();
 				this.openFile(event.file);
+			});
+
+			// Right-click context menu for events
+			eventEl.addEventListener('contextmenu', (e) => {
+				e.preventDefault();
+				e.stopPropagation();
+				this.showEventContextMenu(e, event);
 			});
 
 			// Preview on hover
@@ -793,6 +812,13 @@ export class CalendarView extends ItemView {
 					e.stopPropagation();
 					this.openFile(event.file);
 				});
+
+				// Right-click context menu for events
+				eventEl.addEventListener('contextmenu', (e) => {
+					e.preventDefault();
+					e.stopPropagation();
+					this.showEventContextMenu(e, event);
+				});
 			});
 			
 			if (day.events.length > 4) {
@@ -807,6 +833,13 @@ export class CalendarView extends ItemView {
 		dayEl.addEventListener('click', (e) => {
 			if ((e.target as HTMLElement).closest('.cal-event-mini')) return;
 			this.selectDate(day.dateStr);
+		});
+
+		// Right-click context menu
+		dayEl.addEventListener('contextmenu', (e) => {
+			if ((e.target as HTMLElement).closest('.cal-event-mini')) return;
+			e.preventDefault();
+			this.showDayContextMenu(e, day.dateStr);
 		});
 	}
 
@@ -885,6 +918,12 @@ export class CalendarView extends ItemView {
 				});
 				
 				item.addEventListener('click', () => this.openFile(event.file));
+
+				// Right-click context menu for events
+				item.addEventListener('contextmenu', (e) => {
+					e.preventDefault();
+					this.showEventContextMenu(e, event);
+				});
 
 				// Preview on hover
 				if (this.plugin.settings.showPreviewOnHover) {
@@ -980,6 +1019,111 @@ export class CalendarView extends ItemView {
 	private openFile(file: TFile): void {
 		this.app.workspace.openLinkText(file.path, '', false);
 		eventBus.emit('noteOpened', { file });
+	}
+
+	/**
+	 * Show context menu for a day
+	 */
+	private showDayContextMenu(e: MouseEvent, dateStr: string): void {
+		const menu = new Menu();
+		
+		menu.addItem((item) => {
+			item.setTitle('Create new event')
+				.setIcon('plus')
+				.onClick(() => {
+					this.selectedDate = dateStr;
+					this.createNote();
+				});
+		});
+		
+		menu.showAtMouseEvent(e);
+	}
+
+	/**
+	 * Show context menu for an event
+	 */
+	private showEventContextMenu(e: MouseEvent, event: CalendarEvent): void {
+		const menu = new Menu();
+		
+		menu.addItem((item) => {
+			item.setTitle('Open event')
+				.setIcon('file-text')
+				.onClick(() => {
+					this.openFile(event.file);
+				});
+		});
+		
+		menu.addSeparator();
+		
+		menu.addItem((item) => {
+			item.setTitle('Delete event')
+				.setIcon('trash')
+				.onClick(async () => {
+					const confirmed = await this.confirmDelete(event.title);
+					if (confirmed) {
+						await this.deleteEvent(event.file);
+					}
+				});
+		});
+		
+		menu.showAtMouseEvent(e);
+	}
+
+	/**
+	 * Confirm event deletion
+	 */
+	private async confirmDelete(title: string): Promise<boolean> {
+		return new Promise((resolve) => {
+			const modal = new Modal(this.app);
+			modal.titleEl.setText('Delete Event');
+			
+			modal.contentEl.createEl('p', {
+				text: `Are you sure you want to delete "${title}"? This action cannot be undone.`
+			});
+			
+			const buttonContainer = modal.contentEl.createEl('div', {
+				cls: 'modal-button-container'
+			});
+			buttonContainer.style.display = 'flex';
+			buttonContainer.style.justifyContent = 'flex-end';
+			buttonContainer.style.gap = '8px';
+			buttonContainer.style.marginTop = '16px';
+			
+			const cancelBtn = buttonContainer.createEl('button', {
+				text: 'Cancel',
+				cls: 'mod-cta'
+			});
+			cancelBtn.addEventListener('click', () => {
+				modal.close();
+				resolve(false);
+			});
+			
+			const deleteBtn = buttonContainer.createEl('button', {
+				text: 'Delete',
+				cls: 'mod-warning'
+			});
+			deleteBtn.addEventListener('click', () => {
+				modal.close();
+				resolve(true);
+			});
+			
+			modal.open();
+			// Focus delete button
+			setTimeout(() => deleteBtn.focus(), 100);
+		});
+	}
+
+	/**
+	 * Delete an event file
+	 */
+	private async deleteEvent(file: TFile): Promise<void> {
+		try {
+			await this.app.vault.delete(file);
+			// Refresh after deletion
+			setTimeout(() => this.refresh(), 100);
+		} catch (error) {
+			console.error('Failed to delete event:', error);
+		}
 	}
 
 	/**
