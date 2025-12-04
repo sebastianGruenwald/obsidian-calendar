@@ -166,18 +166,21 @@ export class CalendarCore {
 
 				if (!this.hasRequiredTags(cache)) continue;
 
-				const event = this.createEventFromFile(file, cache);
-				if (!event) continue;
+				// Support multiple dates per file
+				const events = this.createEventsFromFile(file, cache);
+				if (events.length === 0) continue;
 
-				// Handle recurring events
-				if (event.recurrence && event.recurrence !== 'none') {
-					this.addRecurringEvents(eventsWithDates, event, viewStartDate, viewEndDate);
-				} else if (event.endDateStr) {
-					// Handle date range events
-					this.addDateRangeEvents(eventsWithDates, event);
-				} else {
-					// Single date event
-					this.addEventToMap(eventsWithDates, event.dateStr, event);
+				for (const event of events) {
+					// Handle recurring events
+					if (event.recurrence && event.recurrence !== 'none') {
+						this.addRecurringEvents(eventsWithDates, event, viewStartDate, viewEndDate);
+					} else if (event.endDateStr) {
+						// Handle date range events
+						this.addDateRangeEvents(eventsWithDates, event);
+					} else {
+						// Single date event
+						this.addEventToMap(eventsWithDates, event.dateStr, event);
+					}
 				}
 			} catch (error) {
 				console.error(`Error processing file ${file.path}:`, error);
@@ -240,6 +243,48 @@ export class CalendarCore {
 	}
 
 	/**
+	 * Create CalendarEvents from a file supporting multiple dates
+	 */
+	private createEventsFromFile(file: TFile, cache: CachedMetadata): CalendarEvent[] {
+		const dates = this.getDatesFromFrontmatter(cache, this.settings.dateProperty);
+		if (dates.length === 0) return [];
+
+		const frontmatter = cache.frontmatter || {};
+		
+		// Get optional properties (shared across all dates)
+		const endDateStr = this.getDateFromFrontmatter(cache, this.settings.endDateProperty);
+		const time = frontmatter[this.settings.timeProperty]?.toString() || undefined;
+		const rawColor = frontmatter[this.settings.colorProperty]?.toString() || undefined;
+		const color = rawColor ? SettingsValidator.resolveColor(rawColor) : undefined;
+		const recurrence = this.parseRecurrence(frontmatter[this.settings.recurrenceProperty]);
+		const recurrenceDays = this.parseRecurrenceDays(frontmatter[this.settings.recurrenceDaysProperty]);
+
+		const events: CalendarEvent[] = [];
+
+		for (const dateStr of dates) {
+			const normalizedDate = this.normalizeDate(dateStr);
+			if (!normalizedDate) continue;
+
+			const normalizedEndDate = endDateStr ? this.normalizeDate(endDateStr) : undefined;
+
+			events.push({
+				file,
+				title: file.basename,
+				dateStr: normalizedDate,
+				endDateStr: normalizedEndDate || undefined,
+				time,
+				color,
+				recurrence,
+				recurrenceDays,
+				isRecurring: recurrence !== undefined && recurrence !== 'none',
+				originalDateStr: normalizedDate
+			});
+		}
+
+		return events;
+	}
+
+	/**
 	 * Add event to map helper
 	 */
 	private addEventToMap(map: Map<string, CalendarEvent[]>, dateStr: string, event: CalendarEvent): void {
@@ -267,7 +312,16 @@ export class CalendarCore {
 		let iterations = 0;
 
 		while (currentDate <= endDate && iterations < maxIterations) {
-			if (currentDate >= actualStartDate) {
+			// Check if this date matches the recurrence pattern
+			let shouldInclude = currentDate >= actualStartDate;
+			
+			// For daily recurrence with specific weekdays, check if current day is in the list
+			if (shouldInclude && event.recurrence === 'daily' && event.recurrenceDays && event.recurrenceDays.length > 0) {
+				const dayOfWeek = currentDate.getDay();
+				shouldInclude = event.recurrenceDays.includes(dayOfWeek);
+			}
+			
+			if (shouldInclude) {
 				const dateStr = DateUtils.toDateString(currentDate);
 				const recurringEvent: CalendarEvent = {
 					...event,
@@ -351,11 +405,51 @@ export class CalendarCore {
 	private parseRecurrence(value: unknown): RecurrencePattern | undefined {
 		if (!value) return undefined;
 		
-		const str = value.toString().toLowerCase();
+		const str = String(value).toLowerCase();
 		if (['daily', 'weekly', 'monthly', 'yearly', 'none'].includes(str)) {
 			return str as RecurrencePattern;
 		}
 		return undefined;
+	}
+
+	/**
+	 * Parse recurrence days from frontmatter value
+	 * Accepts: [1,2,3,4,5] or ["Mon","Tue","Wed"] or "Mon,Tue,Wed"
+	 */
+	private parseRecurrenceDays(value: unknown): number[] | undefined {
+		if (!value) return undefined;
+		
+		const dayMap: Record<string, number> = {
+			'sun': 0, 'sunday': 0,
+			'mon': 1, 'monday': 1,
+			'tue': 2, 'tuesday': 2,
+			'wed': 3, 'wednesday': 3,
+			'thu': 4, 'thursday': 4,
+			'fri': 5, 'friday': 5,
+			'sat': 6, 'saturday': 6
+		};
+		
+		const result: number[] = [];
+		
+		if (Array.isArray(value)) {
+			for (const item of value) {
+				if (typeof item === 'number' && item >= 0 && item <= 6) {
+					result.push(item);
+				} else if (typeof item === 'string') {
+					const day = dayMap[item.toLowerCase()];
+					if (day !== undefined) result.push(day);
+				}
+			}
+		} else if (typeof value === 'string') {
+			const parts = value.split(/[,\s]+/);
+			for (const part of parts) {
+				const trimmed = part.trim().toLowerCase();
+				const day = dayMap[trimmed];
+				if (day !== undefined) result.push(day);
+			}
+		}
+		
+		return result.length > 0 ? result : undefined;
 	}
 
 	/**
@@ -400,7 +494,7 @@ export class CalendarCore {
 	}
 
 	/**
-	 * Extract date from frontmatter
+	 * Extract date(s) from frontmatter - supports single date or array of dates
 	 */
 	private getDateFromFrontmatter(cache: CachedMetadata, property: string): string | null {
 		if (!cache.frontmatter) return null;
@@ -409,7 +503,26 @@ export class CalendarCore {
 		
 		if (!dateValue) return null;
 		
-		return dateValue.toString();
+		// Return first date if array, otherwise return as string
+		// (we'll handle arrays in getDatesFromFrontmatter)
+		return Array.isArray(dateValue) ? dateValue[0]?.toString() : dateValue.toString();
+	}
+
+	/**
+	 * Extract all dates from frontmatter - supports single date or array of dates
+	 */
+	private getDatesFromFrontmatter(cache: CachedMetadata, property: string): string[] {
+		if (!cache.frontmatter) return [];
+
+		const dateValue = cache.frontmatter[property];
+		
+		if (!dateValue) return [];
+		
+		if (Array.isArray(dateValue)) {
+			return dateValue.map(d => d.toString()).filter(d => d.length > 0);
+		}
+		
+		return [dateValue.toString()];
 	}
 
 	/**

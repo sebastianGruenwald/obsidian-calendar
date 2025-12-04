@@ -1056,6 +1056,16 @@ export class CalendarView extends ItemView {
 		menu.addSeparator();
 		
 		menu.addItem((item) => {
+			item.setTitle('Add date to event')
+				.setIcon('calendar-plus')
+				.onClick(() => {
+					this.showDatePicker(event);
+				});
+		});
+		
+		menu.addSeparator();
+		
+		menu.addItem((item) => {
 			item.setTitle('Delete event')
 				.setIcon('trash')
 				.onClick(async () => {
@@ -1111,6 +1121,72 @@ export class CalendarView extends ItemView {
 			// Focus delete button
 			setTimeout(() => deleteBtn.focus(), 100);
 		});
+	}
+
+	/**
+	 * Show date picker modal to add a date to an event
+	 */
+	private showDatePicker(event: CalendarEvent): void {
+		const modal = new DatePickerModal(this.app, async (selectedDate: Date) => {
+			await this.addDateToEvent(event.file, selectedDate);
+		});
+		modal.open();
+	}
+
+	/**
+	 * Add a date to an event's frontmatter
+	 */
+	private async addDateToEvent(file: TFile, newDate: Date): Promise<void> {
+		try {
+			const content = await this.app.vault.read(file);
+			const dateStr = DateUtils.toDateString(newDate);
+			
+			// Parse frontmatter
+			const frontmatterRegex = /^---\n([\s\S]*?)\n---/;
+			const match = content.match(frontmatterRegex);
+			
+			if (!match) {
+				console.error('No frontmatter found in file');
+				return;
+			}
+			
+			const frontmatterContent = match[1];
+			const dateProperty = this.plugin.settings.dateProperty;
+			
+			// Check if date property exists and parse its value
+			const datePropertyRegex = new RegExp(`^${dateProperty}:\\s*(.+)$`, 'm');
+			const dateMatch = frontmatterContent.match(datePropertyRegex);
+			
+			let newFrontmatter: string;
+			
+			if (dateMatch) {
+				const currentValue = dateMatch[1].trim();
+				
+				// Check if it's already an array
+				if (currentValue.startsWith('[')) {
+					// Add to existing array
+					const newValue = currentValue.replace(/\]$/, `, "${dateStr}"]`);
+					newFrontmatter = frontmatterContent.replace(datePropertyRegex, `${dateProperty}: ${newValue}`);
+				} else {
+					// Convert single value to array
+					newFrontmatter = frontmatterContent.replace(
+						datePropertyRegex,
+						`${dateProperty}: ["${currentValue}", "${dateStr}"]`
+					);
+				}
+			} else {
+				// Add new date property
+				newFrontmatter = frontmatterContent + `\n${dateProperty}: "${dateStr}"`;
+			}
+			
+			const newContent = content.replace(frontmatterRegex, `---\n${newFrontmatter}\n---`);
+			await this.app.vault.modify(file, newContent);
+			
+			// Refresh the calendar
+			setTimeout(() => this.refresh(), 100);
+		} catch (error) {
+			console.error('Failed to add date to event:', error);
+		}
 	}
 
 	/**
@@ -1366,5 +1442,140 @@ export class CalendarView extends ItemView {
 		} else {
 			this.viewContainerEl.removeClass('cal-expanded-mode');
 		}
+	}
+}
+
+/**
+ * Date Picker Modal for selecting a date
+ */
+class DatePickerModal extends Modal {
+	private onSelectDate: (date: Date) => void;
+	private selectedDate: Date;
+	private currentMonth: Date;
+
+	constructor(app: any, onSelectDate: (date: Date) => void) {
+		super(app);
+		this.onSelectDate = onSelectDate;
+		this.selectedDate = new Date();
+		this.currentMonth = new Date();
+	}
+
+	onOpen(): void {
+		const { contentEl, titleEl } = this;
+		
+		titleEl.setText('Select a Date');
+		contentEl.addClass('calendar-date-picker-modal');
+		
+		this.renderDatePicker();
+	}
+
+	onClose(): void {
+		const { contentEl } = this;
+		contentEl.empty();
+	}
+
+	private renderDatePicker(): void {
+		const { contentEl } = this;
+		contentEl.empty();
+		
+		// Header with month/year navigation
+		const header = contentEl.createEl('div', { cls: 'date-picker-header' });
+		
+		const prevBtn = header.createEl('button', { cls: 'date-picker-nav' });
+		setIcon(prevBtn, 'chevron-left');
+		prevBtn.addEventListener('click', () => {
+			this.currentMonth = DateUtils.addMonths(this.currentMonth, -1);
+			this.renderDatePicker();
+		});
+		
+		const monthYear = header.createEl('div', { 
+			cls: 'date-picker-title',
+			text: this.currentMonth.toLocaleDateString(DateUtils.getLocale(), { 
+				month: 'long', 
+				year: 'numeric' 
+			})
+		});
+		
+		const nextBtn = header.createEl('button', { cls: 'date-picker-nav' });
+		setIcon(nextBtn, 'chevron-right');
+		nextBtn.addEventListener('click', () => {
+			this.currentMonth = DateUtils.addMonths(this.currentMonth, 1);
+			this.renderDatePicker();
+		});
+		
+		// Day headers
+		const dayHeaders = contentEl.createEl('div', { cls: 'date-picker-days-header' });
+		const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+		dayNames.forEach(name => {
+			dayHeaders.createEl('div', { cls: 'date-picker-day-name', text: name });
+		});
+		
+		// Calendar grid
+		const grid = contentEl.createEl('div', { cls: 'date-picker-grid' });
+		
+		const year = this.currentMonth.getFullYear();
+		const month = this.currentMonth.getMonth();
+		const firstDay = new Date(year, month, 1);
+		const lastDay = new Date(year, month + 1, 0);
+		
+		// Start from Sunday of the week containing the 1st
+		const startDate = new Date(firstDay);
+		startDate.setDate(startDate.getDate() - firstDay.getDay());
+		
+		const today = new Date();
+		
+		// Generate 6 weeks
+		for (let i = 0; i < 42; i++) {
+			const date = new Date(startDate);
+			date.setDate(date.getDate() + i);
+			
+			const isCurrentMonth = date.getMonth() === month;
+			const isToday = DateUtils.isSameDay(date, today);
+			const isSelected = DateUtils.isSameDay(date, this.selectedDate);
+			
+			const classes = ['date-picker-day'];
+			if (!isCurrentMonth) classes.push('date-picker-day-other');
+			if (isToday) classes.push('date-picker-day-today');
+			if (isSelected) classes.push('date-picker-day-selected');
+			
+			const dayEl = grid.createEl('div', { 
+				cls: classes.join(' '),
+				text: date.getDate().toString()
+			});
+			
+			dayEl.addEventListener('click', () => {
+				this.selectedDate = new Date(date);
+				this.renderDatePicker();
+			});
+		}
+		
+		// Action buttons
+		const actions = contentEl.createEl('div', { cls: 'date-picker-actions' });
+		
+		const todayBtn = actions.createEl('button', { 
+			text: 'Today',
+			cls: 'mod-cta'
+		});
+		todayBtn.addEventListener('click', () => {
+			this.selectedDate = new Date();
+			this.currentMonth = new Date();
+			this.renderDatePicker();
+		});
+		
+		const buttonContainer = actions.createEl('div', { cls: 'date-picker-buttons' });
+		
+		const cancelBtn = buttonContainer.createEl('button', { text: 'Cancel' });
+		cancelBtn.addEventListener('click', () => {
+			this.close();
+		});
+		
+		const selectBtn = buttonContainer.createEl('button', { 
+			text: 'Select',
+			cls: 'mod-cta'
+		});
+		selectBtn.addEventListener('click', () => {
+			this.onSelectDate(this.selectedDate);
+			this.close();
+		});
 	}
 }

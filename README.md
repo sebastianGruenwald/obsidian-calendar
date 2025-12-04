@@ -24,7 +24,8 @@ A modern, beautiful calendar view plugin for Obsidian that displays and manages 
 ### Event Features
 - **Event Colors**: Assign colors to events via frontmatter
 - **Time Support**: Display event times from frontmatter
-- **Recurring Events**: Support for daily, weekly, monthly, and yearly recurrence
+- **Recurring Events**: Support for daily, weekly, monthly, and yearly recurrence (perfect for jour fixe meetings)
+- **Multiple Dates**: Single note can appear on multiple specific dates
 - **Date Ranges**: Events can span multiple days with start and end dates
 - **Hover Preview**: Preview note content on hover
 
@@ -160,7 +161,7 @@ Available colors: `red`, `orange`, `yellow`, `green`, `blue`, `purple`, `pink`, 
 ```markdown
 ---
 date: 2024-01-15
-recurring: weekly
+recurrence: weekly
 tags:
   - calendar
 ---
@@ -170,7 +171,13 @@ tags:
 Repeats every week starting January 15th.
 ```
 
-Recurrence options: `daily`, `weekly`, `monthly`, `yearly`
+Recurrence options: `daily`, `weekly`, `monthly`, `yearly`, `none`
+
+**Examples:**
+- `daily`: Every day (e.g., daily standup meetings)
+- `weekly`: Every week on the same day (e.g., weekly team meetings, jour fixe)
+- `monthly`: Every month on the same date (e.g., monthly reviews)
+- `yearly`: Every year on the same date (e.g., anniversaries, birthdays)
 
 #### Multi-Day Event
 ```markdown
@@ -185,6 +192,30 @@ tags:
 
 Spans from January 15th to 17th.
 ```
+
+#### Multiple Dates Event
+```markdown
+---
+date:
+  - 2024-01-10
+  - 2024-01-17
+  - 2024-01-24
+  - 2024-01-31
+tags:
+  - calendar
+---
+
+# Training Sessions
+
+This single note appears on multiple specific dates.
+Perfect for tracking related events without creating separate files.
+```
+
+**Use Cases for Multiple Dates:**
+- Training sessions on specific dates
+- Important milestone dates for a project
+- Multiple appointments or meetings
+- Non-recurring events that happen on specific dates
 
 ### Multiple Tags Filtering
 

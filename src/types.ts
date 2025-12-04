@@ -11,6 +11,7 @@ export interface CalendarPluginSettings {
 	timeProperty: string;
 	colorProperty: string;
 	recurrenceProperty: string;
+	recurrenceDaysProperty: string;
 	noteFolder: string;
 	noteTemplate: string;
 	dateFormat: string;
@@ -54,6 +55,7 @@ export interface CalendarEvent {
 	time?: string;
 	color?: string;
 	recurrence?: RecurrencePattern;
+	recurrenceDays?: number[]; // For daily recurrence: 0=Sun, 1=Mon, ..., 6=Sat
 	isRecurring: boolean;
 	originalDateStr?: string; // For recurring events, the original date
 }
@@ -189,6 +191,7 @@ export const DEFAULT_SETTINGS: CalendarPluginSettings = {
 	timeProperty: 'time',
 	colorProperty: 'color',
 	recurrenceProperty: 'recurrence',
+	recurrenceDaysProperty: 'recurrenceDays',
 	noteFolder: '',
 	noteTemplate: '# {{title}}\n\nCreated on {{date}}',
 	dateFormat: 'YYYY-MM-DD',
